@@ -6,7 +6,9 @@ from streamlit_folium import st_folium
 
 # ตั้งค่าหน้าเว็บ Streamlit (Layout กว้างเต็มจอ)
 st.set_page_config(
-    page_title="ระบบแผนที่จัดส่งสินค้า", page_icon="🗺️", layout="wide"
+    page_title="ระบบแผนที่จัดส่งสินค้า (High Performance)",
+    page_icon="🗺️",
+    layout="wide",
 )
 
 # ตกแต่ง UI เล็กน้อย
@@ -25,7 +27,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (OpenStreetMap)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (โหมดคัดกรองล่วงหน้าเพื่อความเร็ว)</div>',
     unsafe_allow_html=True,
 )
 
@@ -74,34 +76,46 @@ def process_coordinates(data_frame):
 
 df = process_coordinates(df)
 
-# --- Sidebar: ตัวกรองข้อมูล (Dropdown) ---
-st.sidebar.header("🔍 ตัวกรองข้อมูล (Filters)")
+# --- Sidebar: ตัวกรองข้อมูลหลัก (บังคับเลือกสาขา/คลังก่อนเพื่อความเร็ว) ---
+st.sidebar.header("🔍 ตัวกรองหลักเพื่อความเร็ว")
 
-warehouses = (
-    ["ทั้งหมด"] + df["คลัง"].dropna().unique().tolist()
-    if "คลัง" in df.columns
-    else ["ทั้งหมด"]
+all_warehouses = (
+    df["คลัง"].dropna().unique().tolist() if "คลัง" in df.columns else []
 )
-sel_warehouse = st.sidebar.selectbox("เลือกคลังสินค้า", warehouses, index=0)
+# ให้ผู้ใช้เลือกคลัง (สามารถเลือกได้หลายคลัง หรือเลือกทั้งหมด)
+selected_warehouses = st.sidebar.multiselect(
+    "1. เลือกคลังสินค้าที่ต้องการแสดง (บังคับ/เลือกได้หลายคลัง):",
+    all_warehouses,
+    default=all_warehouses[[:1]] if all_warehouses else [],
+)
+
+# กรองข้อมูลตามคลังที่เลือกในเบื้องต้น
+if selected_warehouses:
+  filtered_df = df[df["คลัง"].isin(selected_warehouses)]
+else:
+  filtered_df = df.iloc[
+      0:0
+  ]  # ถ้ายังไม่เลือก ให้เป็นตารางว่างเพื่อป้องกันโหลดหนักเกินไป
+
+# ตัวกรองย่อยเพิ่มเติม (เบอร์รถ / รอบส่ง)
+st.sidebar.markdown("---")
+st.sidebar.header("⚙️ ตัวกรองเพิ่มเติม")
 
 trucks = (
-    ["ทั้งหมด"] + df["เบอร์รถ"].dropna().unique().tolist()
-    if "เบอร์รถ" in df.columns
+    ["ทั้งหมด"] + filtered_df["เบอร์รถ"].dropna().unique().tolist()
+    if "เบอร์รถ" in filtered_df.columns
     else ["ทั้งหมด"]
 )
 sel_truck = st.sidebar.selectbox("เลือกเบอร์รถ", trucks, index=0)
 
 rounds = (
-    ["ทั้งหมด"] + df["รอบส่งประจำสัปดาห์"].dropna().unique().tolist()
-    if "รอบส่งประจำสัปดาห์" in df.columns
+    ["ทั้งหมด"] + filtered_df["รอบส่งประจำสัปดาห์"].dropna().unique().tolist()
+    if "รอบส่งประจำสัปดาห์" in filtered_df.columns
     else ["ทั้งหมด"]
 )
 sel_round = st.sidebar.selectbox("เลือกรอบส่งประจำสัปดาห์", rounds, index=0)
 
-# กรองข้อมูลตาม Dropdown
-filtered_df = df.copy()
-if sel_warehouse != "ทั้งหมด":
-  filtered_df = filtered_df[filtered_df["คลัง"] == sel_warehouse]
+# กรองข้อมูลซ้ำตามตัวกรองย่อย
 if sel_truck != "ทั้งหมด":
   filtered_df = filtered_df[filtered_df["เบอร์รถ"] == sel_truck]
 if sel_round != "ทั้งหมด":
@@ -126,22 +140,23 @@ row_limit = st.sidebar.selectbox(
 
 
 # ==========================================
-# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - ใช้ OpenStreetMap ฟรี 100% ไม่ใช้ API Key)
+# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - จำกัดไม่เกิน 20,000 จุด เพื่อความเร็วสูงสุด)
 # ==========================================
 total_points = len(filtered_df)
 st.subheader(
-    f"🗺️ แผนที่แสดงพิกัดทั้งหมด (จำนวน {total_points:,} จุดตามตัวกรอง)"
+    f"🗺️ แผนที่แสดงพิกัด (รวม {total_points:,} จุด จากคลังที่เลือก)"
 )
 
 map_df = filtered_df.reset_index(drop=True)
 
-# ป้องกันเบราว์เซอร์ค้างหากข้อมูลเกิน 5,000 จุด
-if total_points > 5000:
+# กำหนดขีดจำกัดไม่เกิน 20,000 จุดตามเงื่อนไข เพื่อไม่ให้เบราว์เซอร์ค้าง
+MAX_POINTS = 20000
+if total_points > MAX_POINTS:
   st.warning(
-      f"⚠️ ข้อมูลมีจำนวนมากถึง {total_points:,} จุด เพื่อความรวดเร็วในการแสดงผล"
-      " ระบบจะแสดงหมุดบนแผนที่จำนวน 5,000 จุดแรกที่ตรงกับเงื่อนไข"
+      f"⚠️ ข้อมูลมีจำนวน {total_points:,} จุด ซึ่งเกินขีดจำกัด {MAX_POINTS:,}"
+      f" จุด ระบบจะแสดงหมุดบนแผนที่จำนวน {MAX_POINTS:,} จุดแรกเพื่อความลื่นไหล"
   )
-  map_df = map_df.head(5000)
+  map_df = map_df.head(MAX_POINTS)
 
 if not map_df.empty:
   center_lat = map_df["lat"].mean()
@@ -149,7 +164,7 @@ if not map_df.empty:
 else:
   center_lat, center_lon = 13.7563, 100.5018
 
-# สร้างแผนที่ด้วย OpenStreetMap (Tiles มาตรฐาน ฟรี และไม่ต้องใช้ API Key)
+# สร้างแผนที่ด้วย OpenStreetMap (ฟรี 100% ไม่ใช้ API Key)
 m = folium.Map(
     location=[center_lat, center_lon],
     zoom_start=10,
@@ -240,7 +255,8 @@ st_data = st_folium(m, width="100%", height=500)
 st.markdown("---")
 st.subheader("📋 รายละเอียดข้อมูล (แสดงด้านล่าง)")
 st.info(
-    "💡 แสดงข้อมูลตามตัวกรองด้านข้าง สามารถเลือกดูแบบ 50, 100, 500 หรือทั้งหมดได้"
+    "💡 แสดงข้อมูลตามคลังและตัวกรองที่เลือก สามารถเลือกดูแบบ 50, 100, 500"
+    " หรือทั้งหมดได้"
 )
 
 display_cols = [
@@ -264,3 +280,5 @@ if not filtered_df.empty:
   )
 
   st.dataframe(table_display, use_container_width=True)
+else:
+  st.warning("⚠️ กรุณาเลือกคลังสินค้าในแถบด้านข้าง (Sidebar) เพื่อแสดงข้อมูล")
