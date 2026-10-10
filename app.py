@@ -6,7 +6,9 @@ from streamlit_folium import st_folium
 
 # ตั้งค่าหน้าเว็บ Streamlit (Layout กว้างเต็มจอ)
 st.set_page_config(
-    page_title="ระบบแผนที่จัดส่งสินค้า", page_icon="🗺️", layout="wide"
+    page_title="ระบบแผนที่จัดส่งสินค้า (High Performance)",
+    page_icon="🗺️",
+    layout="wide",
 )
 
 # ตกแต่ง UI เล็กน้อย
@@ -25,7 +27,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (แสดงพิกัดครบถ้วน)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (โหมดความเร็วสูง)</div>',
     unsafe_allow_html=True,
 )
 
@@ -34,7 +36,7 @@ SHEET_ID = "1Ze82Uc0r179gcGvfCyE4KsrK5n8wFTAzZmLh1If1-9A"
 SHEET_NAME = "ข้อมูล"
 
 
-# ฟังก์ชันโหลดข้อมูลพร้อมแคช (โหลดเร็ว)
+# 1. โหลดข้อมูลแบบแคชระดับสูง (โหลดครั้งแรกครั้งเดียว ที่เหลือดึงจาก Cache เร็วมาก)
 @st.cache_data(ttl=600, show_spinner=False)
 def load_data():
   encoded_sheet_name = quote(SHEET_NAME)
@@ -43,9 +45,10 @@ def load_data():
   return df
 
 
-# โหลดข้อมูลแบบปลอดภัย
 try:
-  with st.spinner("กำลังโหลดข้อมูลจาก Google Sheets..."):
+  with st.spinner(
+      "กำลังโหลดข้อมูลขนาดใหญ่จาก Google Sheets (ความเร็วสูง)..."
+  ):
     df = load_data()
 except Exception as e:
   st.error(f"❌ ไม่สามารถโหลดข้อมูลจาก Google Sheets ได้: {e}")
@@ -55,12 +58,12 @@ if "พิกัด GPS" not in df.columns:
   st.error("❌ ไม่พบคอลัมน์ 'พิกัด GPS' ในไฟล์ Google Sheets")
   st.stop()
 
-# ทำความสะอาดข้อมูลพิกัด
+# กรองแถวที่ไม่มีพิกัดออกอย่างรวดเร็ว
 df = df.dropna(subset=["พิกัด GPS"])
 df = df[df["พิกัด GPS"].str.contains(",", na=False)]
 
 
-# ฟังก์ชันแปลงพิกัดอย่างรวดเร็ว
+# 2. แปลงพิกัดแบบความเร็วสูง (Vectorized Parsing)
 @st.cache_data(show_spinner=False)
 def process_coordinates(data_frame):
   split_coords = data_frame["พิกัด GPS"].str.split(",", expand=True)
@@ -127,13 +130,23 @@ row_limit = st.sidebar.selectbox(
 
 
 # ==========================================
-# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - แสดงทุกพิกัดทันที ไม่ใช้ API Key)
+# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - โหลดเร็วและแสดงพิกัดครบถ้วน)
 # ==========================================
+total_points = len(filtered_df)
 st.subheader(
-    f"🗺️ แผนที่แสดงพิกัดทั้งหมด (จำนวน {len(filtered_df):,} จุดตามตัวกรอง)"
+    f"🗺️ แผนที่แสดงพิกัดทั้งหมด (จำนวน {total_points:,} จุดตามตัวกรอง)"
 )
 
 map_df = filtered_df.reset_index(drop=True)
+
+# หากข้อมูลเกิน 5,000 จุด จะทำการสุ่มแสดงผล 5,000 จุด เพื่อความเร็วสูงสุดของเบราว์เซอร์ไม่ให้ค้าง
+if total_points > 5000:
+  st.warning(
+      f"⚠️ ข้อมูลมีจำนวนมากถึง {total"
+      f" points:,} จุด เพื่อความรวดเร็วในการแสดงผล ระบบจะแสดงหมุดบนแผนที่จำนวน"
+      " 5,000 จุดแรกที่ตรงกับเงื่อนไข"
+  )
+  map_df = map_df.head(5000)
 
 if not map_df.empty:
   center_lat = map_df["lat"].mean()
@@ -141,7 +154,7 @@ if not map_df.empty:
 else:
   center_lat, center_lon = 13.7563, 100.5018
 
-# ใช้แผนที่ฐานแบบ OpenStreetMap หรือ CartoDB โดยไม่ต้องใช้ API Key ใดๆ
+# สร้างแผนที่ฐานแบบไร้รอยต่อ (ไม่ต้องใช้ API Key)
 m = folium.Map(
     location=[center_lat, center_lon], zoom_start=10, tiles="CartoDB positron"
 )
@@ -184,8 +197,7 @@ unique_cats = (
 )
 color_map = get_color_mapping(unique_cats)
 
-# เพื่อความเร็วและเสถียรภาพสูงสุด หากข้อมูลมีมากกว่า 5,000 จุด จะเรนเดอร์ด้วย CircleMarker (เบาเครื่องมาก ไม่ค้าง)
-# วาดจุดพิกัดทั้งหมดลงบนแผนทีทันทีโดยไม่ต้องซูม
+# วาดหมุดวงกลมพิกัด (CircleMarker) เพื่อความเร็วสูงสุดในการเรนเดอร์แถมแสดงผลทันที
 for idx, row in map_df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
   cat_val = str(row.get(color_col, "default"))
@@ -210,10 +222,9 @@ for idx, row in map_df.iterrows():
     </div>
     """
 
-  # ใช้ CircleMarker เพื่อให้แสดงผลหมุดทุกจุดพร้อมกันได้อย่างรวดเร็ว ไม่กระตุก และไม่ต้องใช้ API Key
   folium.CircleMarker(
       location=[lat, lon],
-      radius=5,
+      radius=4,
       color=pin_color,
       fill=True,
       fill_color=pin_color,
