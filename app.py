@@ -4,9 +4,11 @@ import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 
-# ตั้งค่าหน้าเว็บ Streamlit
+# ตั้งค่าหน้าเว็บ Streamlit (Layout กว้างเต็มจอ)
 st.set_page_config(
-    page_title="ระบบแผนที่จัดส่งสินค้า", page_icon="🗺️", layout="wide"
+    page_title="ระบบแผนที่จัดส่งสินค้า (High Performance)",
+    page_icon="🗺️",
+    layout="wide",
 )
 
 # ตกแต่ง UI เล็กน้อย
@@ -17,7 +19,7 @@ st.markdown(
             font-size: 24px;
             font-weight: bold;
             color: #1e293b;
-            margin-bottom: 10px;
+            margin-bottom: 5px;
         }
     </style>
 """,
@@ -34,18 +36,19 @@ SHEET_ID = "1Ze82Uc0r179gcGvfCyE4KsrK5n8wFTAzZmLh1If1-9A"
 SHEET_NAME = "ข้อมูล"
 
 
-# ฟังก์ชันโหลดข้อมูลพร้อมแคช
-@st.cache_data(ttl=600)
+# ฟังก์ชันโหลดข้อมูลพร้อมแคชระดับสูง (เพิ่มความเร็วในการเปิดใช้งานครั้งถัดไป)
+@st.cache_data(ttl=600, show_spinner=False)
 def load_data():
   encoded_sheet_name = quote(SHEET_NAME)
   url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded_sheet_name}"
-  df = pd.read_csv(url, encoding="utf-8", dtype=str)
+  # โหลดเฉพาะคอลัมน์ที่จำเป็นหรือโหลดแบบกำหนดประเภทข้อมูล string เพื่อความเร็ว
+  df = pd.read_csv(url, encoding="utf-8", dtype=str, low_memory=False)
   return df
 
 
-# โหลดข้อมูลแบบปลอดภัย ป้องกันแอปพัง
+# โหลดข้อมูลแบบปลอดภัย พร้อมแสดงสถานะกำลังโหลด
 try:
-  with st.spinner("กำลังเชื่อมต่อและโหลดข้อมูลจาก Google Sheets..."):
+  with st.spinner("กำลังโหลดข้อมูลจาก Google Sheets (ความเร็วสูง)..."):
     df = load_data()
 except Exception as e:
   st.error(f"❌ ไม่สามารถโหลดข้อมูลจาก Google Sheets ได้: {e}")
@@ -63,23 +66,30 @@ if "พิกัด GPS" not in df.columns:
   )
   st.stop()
 
-# ทำความสะอาดข้อมูลพิกัด
+# ทำความสะอาดข้อมูลพิกัดเบื้องต้น
 df = df.dropna(subset=["พิกัด GPS"])
 df = df[df["พิกัด GPS"].str.contains(",", na=False)]
 
 
-def parse_lat_lon(val):
-  try:
-    parts = str(val).split(",")
-    return float(parts[0].strip()), float(parts[1].strip())
-  except:
-    return None, None
+# ฟังก์ชันแปลงพิกัดอย่างรวดเร็ว
+@st.cache_data(show_spinner=False)
+def process_coordinates(data_frame):
+  lats = []
+  lons = []
+  for val in data_frame["พิกัด GPS"]:
+    try:
+      parts = val.split(",")
+      lats.append(float(parts[0].strip()))
+      lons.append(float(parts[1].strip()))
+    except:
+      lats.append(None)
+      lons.append(None)
+  data_frame["lat"] = lats
+  data_frame["lon"] = lons
+  return data_frame.dropna(subset=["lat", "lon"])
 
 
-lat_lon_df = df["พิกัด GPS"].apply(lambda x: pd.Series(parse_lat_lon(x)))
-df["lat"] = lat_lon_df[0]
-df["lon"] = lat_lon_df[1]
-df = df.dropna(subset=["lat", "lon"])
+df = process_coordinates(df)
 
 # --- Sidebar: ตัวกรองข้อมูล (Dropdown) ---
 st.sidebar.header("🔍 ตัวกรองข้อมูล (Filters)")
@@ -108,7 +118,7 @@ rounds = (
 )
 sel_round = st.sidebar.selectbox("เลือกรอบส่งประจำสัปดาห์", rounds, index=0)
 
-# กรองข้อมูลตาม Dropdown
+# กรองข้อมูลตาม Dropdown (ใช้วิธี vectorized เพื่อความเร็ว)
 filtered_df = df.copy()
 if sel_warehouse != "ทั้งหมด":
   filtered_df = filtered_df[filtered_df["คลัง"] == sel_warehouse]
@@ -128,56 +138,16 @@ page = st.sidebar.radio(
     ],
 )
 
-# --- ตั้งค่าจำนวนแถวแสดงผลตาราง (เพื่อให้ระบบโหลดเร็ว แต่แผนที่จะแสดงทั้งหมด) ---
+# --- ตั้งค่าจำนวนแถวแสดงผลตาราง ---
 st.sidebar.markdown("---")
 row_limit = st.sidebar.selectbox(
-    "⚡ แสดงตารางครั้งละ (แถว):", [50, 100, 500, "ทั้งหมด"], index=0
+    "⚡ แสดงตารางด้านล่างครั้งละ (แถว):", [50, 100, 500, "ทั้งหมด"], index=0
 )
 
-# --- ส่วนตารางข้อมูลและการเลือกพิกัด ---
-st.subheader("📋 รายละเอียดข้อมูลและเลือกพิกัด")
-st.info(
-    "💡 คลิกเลือกแถวในตารางด้านล่างเพื่อเน้นพิกัดบนแผนที่"
-    " (พิกัดอื่นจะเปลี่ยนเป็นสีเทา) *หมายเหตุ: บนแผนที่แสดงพิกัดทั้งหมดตามตัวกรอง*"
-)
 
-display_cols = [
-    c
-    for c in [
-        "รหัสสมาชิก",
-        "ชื่อ-นามสกุล",
-        "ที่อยู่จัดส่ง บ้านเลขที่/อาคาร",
-        "คลัง",
-        "เบอร์รถ",
-        "รอบส่งประจำสัปดาห์",
-        "ยอดส่ง/เดือน ( ก.ย.69)",
-    ]
-    if c in filtered_df.columns
-]
-
-selected_indices = []
-table_display = pd.DataFrame()
-
-if not filtered_df.empty:
-  table_df = filtered_df[display_cols].reset_index(drop=True)
-  table_display = (
-      table_df.head(int(row_limit)) if row_limit != "ทั้งหมด" else table_df
-  )
-
-  event = st.dataframe(
-      table_display,
-      use_container_width=True,
-      on_select="rerun",
-      selection_mode="multi-row",
-      key="main_table",
-  )
-
-  if event and "selection" in event and "rows" in event["selection"]:
-    selected_row_positions = event["selection"]["rows"]
-    # แปลง index ของตารางที่แสดง ให้ตรงกับ index ใน filtered_df จริงๆ
-    selected_indices = table_display.index[selected_row_positions].tolist()
-
-# --- สร้างแผนที่ (แสดงพิกัดทั้งหมดจาก filtered_df โดยไม่จำกัดด้วยแถวของตาราง) ---
+# ==========================================
+# 1. ส่วนแผนที่ (แสดงอยู่ด้านบนสุด)
+# ==========================================
 st.subheader("🗺️ แผนที่แสดงตำแหน่งพิกัดทั้งหมด")
 
 map_df = filtered_df.reset_index(drop=True)
@@ -231,16 +201,16 @@ unique_cats = (
 )
 color_map = get_color_mapping(unique_cats)
 
-# วาดหมุดทั้งหมดใน map_df ลงบนแผนที่ (แสดงทุกพิกัดตามตัวกรอง)
+# ตัวแปรเก็บสถานะการเลือกแถวจากตารางด้านล่าง (ส่งผ่าน session_state)
+selected_indices = st.session_state.get("selected_row_indices", [])
+
+# วาดหมุดทั้งหมดลงบนแผนที่โดยไม่ถูกจำกัดด้วยตาราง 50 แถวแรก
 for idx, row in map_df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
 
-  # ตรวจสอบว่าแถวนี้ถูกเลือกในตารางหรือไม่
-  # เนื่องจาก table_display อาจแสดงแค่ 50 แถว แต่ map_df มีทั้งหมด
-  # เราจะตรวจสอบว่าถ้ารายการนั้นอยู่ใน selected_indices (อิงจาก table_display) หรือถ้าไม่มีการเลือกเลย ให้แสดงสีปกติ
+  # ตรวจสอบการเลือกแถวในตาราง
   is_selected = True
   if selected_indices:
-    # ค้นหาว่า idx นี้ตรงกับแถวที่ถูกเลือกในตารางหรือไม่
     if idx in selected_indices:
       is_selected = True
     else:
@@ -252,7 +222,7 @@ for idx, row in map_df.iterrows():
   else:
     pin_color = "gray"  # เปลี่ยนเป็นสีเทาเมื่อไม่ได้เลือกในตาราง
 
-  # เนื้อหาที่จะแสดงเมื่อเอาเมาส์ชี้ (Tooltip / Hover) โดยไม่ต้องกดคลิก
+  # เอาเมาส์ชี้ (Tooltip) แสดงข้อมูลทันทีโดยไม่ต้องคลิก
   tooltip_html = f"""
     <b>รหัส:</b> {row.get('รหัสสมาชิก', '-')}<br>
     <b>ชื่อ:</b> {row.get('ชื่อ-นามสกุล', '-')}<br>
@@ -261,7 +231,7 @@ for idx, row in map_df.iterrows():
     <b>รอบส่ง:</b> {row.get('รอบส่งประจำสัปดาห์', '-')}
     """
 
-  # กล่องรายละเอียดเพิ่มเติมเมื่อคลิกหมุด (Popup)
+  # คลิกเพื่อดูรายละเอียดเพิ่มเติม (Popup)
   popup_html = f"""
     <div style="width: 200px; font-size: 12px; font-family: sans-serif; background-color: #ffffff; padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1;">
         <b>รหัสสมาชิก:</b> {row.get('รหัสสมาชิก', '-')}<br>
@@ -281,5 +251,58 @@ for idx, row in map_df.iterrows():
       icon=folium.Icon(color=pin_color, icon="info-sign"),
   ).add_to(m)
 
-# เรนเดอร์แผนที่ลงบน Streamlit
-st_data = st_folium(m, width="100%", height=550)
+# แสดงแผนที่ด้านบน
+st_data = st_folium(m, width="100%", height=500)
+
+
+# ==========================================
+# 2. ส่วนตารางข้อมูล (แสดงอยู่ด้านล่าง)
+# ==========================================
+st.markdown("---")
+st.subheader("📋 รายละเอียดข้อมูลและเลือกพิกัด (แสดงด้านล่าง)")
+st.info(
+    "💡 คลิกเลือกแถวในตารางด้านล่างเพื่อเน้นพิกัดบนแผนที่ด้านบน (พิกัดอื่นจะกลายเป็นสีเทา)"
+)
+
+display_cols = [
+    c
+    for c in [
+        "รหัสสมาชิก",
+        "ชื่อ-นามสกุล",
+        "ที่อยู่จัดส่ง บ้านเลขที่/อาคาร",
+        "คลัง",
+        "เบอร์รถ",
+        "รอบส่งประจำสัปดาห์",
+        "ยอดส่ง/เดือน ( ก.ย.69)",
+    ]
+    if c in filtered_df.columns
+]
+
+if not filtered_df.empty:
+  table_df = filtered_df[display_cols].reset_index(drop=True)
+  table_display = (
+      table_df.head(int(row_limit)) if row_limit != "ทั้งหมด" else table_df
+  )
+
+  event = st.dataframe(
+      table_display,
+      use_container_width=True,
+      on_select="rerun",
+      selection_mode="multi-row",
+      key="main_table_bottom",
+  )
+
+  # ดึงข้อมูลแถวที่ถูกเลือกจากตารางด้านล่าง บันทึกลง session_state เพื่อสั่งรีเฟรชแผนที่ด้านบน
+  current_selected_indices = []
+  if event and "selection" in event and "rows" in event["selection"]:
+    selected_row_positions = event["selection"]["rows"]
+    current_selected_indices = table_display.index[
+        selected_row_positions
+    ].tolist()
+
+  if "selected_row_indices" not in st.session_state:
+    st.session_state["selected_row_indices"] = []
+
+  if st.session_state["selected_row_indices"] != current_selected_indices:
+    st.session_state["selected_row_indices"] = current_selected_indices
+    st.rerun()
