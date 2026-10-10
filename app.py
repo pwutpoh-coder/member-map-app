@@ -36,7 +36,7 @@ SHEET_ID = "1Ze82Uc0r179gcGvfCyE4KsrK5n8wFTAzZmLh1If1-9A"
 SHEET_NAME = "ข้อมูล"
 
 
-# 1. โหลดข้อมูลแบบแคชระดับสูง (โหลดครั้งแรกครั้งเดียว ที่เหลือดึงจาก Cache เร็วมาก)
+# 1. โหลดข้อมูลแบบแคชระดับสูง
 @st.cache_data(ttl=600, show_spinner=False)
 def load_data():
   encoded_sheet_name = quote(SHEET_NAME)
@@ -142,9 +142,8 @@ map_df = filtered_df.reset_index(drop=True)
 # หากข้อมูลเกิน 5,000 จุด จะทำการสุ่มแสดงผล 5,000 จุด เพื่อความเร็วสูงสุดของเบราว์เซอร์ไม่ให้ค้าง
 if total_points > 5000:
   st.warning(
-      f"⚠️ ข้อมูลมีจำนวนมากถึง {total"
-      f" points:,} จุด เพื่อความรวดเร็วในการแสดงผล ระบบจะแสดงหมุดบนแผนที่จำนวน"
-      " 5,000 จุดแรกที่ตรงกับเงื่อนไข"
+      f"⚠️ ข้อมูลมีจำนวนมากถึง {total_points:,} จุด เพื่อความรวดเร็วในการแสดงผล"
+      " ระบบจะแสดงหมุดบนแผนที่จำนวน 5,000 จุดแรกที่ตรงกับเงื่อนไข"
   )
   map_df = map_df.head(5000)
 
@@ -197,7 +196,7 @@ unique_cats = (
 )
 color_map = get_color_mapping(unique_cats)
 
-# วาดหมุดวงกลมพิกัด (CircleMarker) เพื่อความเร็วสูงสุดในการเรนเดอร์แถมแสดงผลทันที
+# วาดหมุดวงกลมพิกัด (CircleMarker) เพื่อความเร็วสูงสุดในการเรนเดอร์
 for idx, row in map_df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
   cat_val = str(row.get(color_col, "default"))
