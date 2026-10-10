@@ -82,20 +82,20 @@ st.sidebar.header("🔍 ตัวกรองหลักเพื่อคว�
 all_warehouses = (
     df["คลัง"].dropna().unique().tolist() if "คลัง" in df.columns else []
 )
-# ให้ผู้ใช้เลือกคลัง (สามารถเลือกได้หลายคลัง หรือเลือกทั้งหมด)
+# แก้ไข syntax ให้ถูกต้อง: เลือกคลังแรกเป็นค่าเริ่มต้น
+default_wh = [all_warehouses[0]] if all_warehouses else []
+
 selected_warehouses = st.sidebar.multiselect(
-    "1. เลือกคลังสินค้าที่ต้องการแสดง (บังคับ/เลือกได้หลายคลัง):",
+    "1. เลือกคลังสินค้าที่ต้องการแสดง (เลือกได้หลายคลัง):",
     all_warehouses,
-    default=all_warehouses[[:1]] if all_warehouses else [],
+    default=default_wh,
 )
 
 # กรองข้อมูลตามคลังที่เลือกในเบื้องต้น
 if selected_warehouses:
   filtered_df = df[df["คลัง"].isin(selected_warehouses)]
 else:
-  filtered_df = df.iloc[
-      0:0
-  ]  # ถ้ายังไม่เลือก ให้เป็นตารางว่างเพื่อป้องกันโหลดหนักเกินไป
+  filtered_df = df.iloc[0:0]  # ถ้ายังไม่เลือก ให้เป็นตารางว่าง
 
 # ตัวกรองย่อยเพิ่มเติม (เบอร์รถ / รอบส่ง)
 st.sidebar.markdown("---")
@@ -149,7 +149,7 @@ st.subheader(
 
 map_df = filtered_df.reset_index(drop=True)
 
-# กำหนดขีดจำกัดไม่เกิน 20,000 จุดตามเงื่อนไข เพื่อไม่ให้เบราว์เซอร์ค้าง
+# กำหนดขีดจำกัดไม่เกิน 20,000 จุดตามเงื่อนไข
 MAX_POINTS = 20000
 if total_points > MAX_POINTS:
   st.warning(
