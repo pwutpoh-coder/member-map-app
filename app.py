@@ -6,9 +6,7 @@ from streamlit_folium import st_folium
 
 # ตั้งค่าหน้าเว็บ Streamlit (Layout กว้างเต็มจอ)
 st.set_page_config(
-    page_title="ระบบแผนที่จัดส่งสินค้า (High Performance)",
-    page_icon="🗺️",
-    layout="wide",
+    page_title="ระบบแผนที่จัดส่งสินค้า", page_icon="🗺️", layout="wide"
 )
 
 # ตกแต่ง UI เล็กน้อย
@@ -27,7 +25,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (โหมดความเร็วสูง)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (OpenStreetMap)</div>',
     unsafe_allow_html=True,
 )
 
@@ -46,9 +44,7 @@ def load_data():
 
 
 try:
-  with st.spinner(
-      "กำลังโหลดข้อมูลขนาดใหญ่จาก Google Sheets (ความเร็วสูง)..."
-  ):
+  with st.spinner("กำลังโหลดข้อมูลจาก Google Sheets..."):
     df = load_data()
 except Exception as e:
   st.error(f"❌ ไม่สามารถโหลดข้อมูลจาก Google Sheets ได้: {e}")
@@ -130,7 +126,7 @@ row_limit = st.sidebar.selectbox(
 
 
 # ==========================================
-# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - โหลดเร็วและแสดงพิกัดครบถ้วน)
+# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - ใช้ OpenStreetMap ฟรี 100% ไม่ใช้ API Key)
 # ==========================================
 total_points = len(filtered_df)
 st.subheader(
@@ -139,7 +135,7 @@ st.subheader(
 
 map_df = filtered_df.reset_index(drop=True)
 
-# หากข้อมูลเกิน 5,000 จุด จะทำการสุ่มแสดงผล 5,000 จุด เพื่อความเร็วสูงสุดของเบราว์เซอร์ไม่ให้ค้าง
+# ป้องกันเบราว์เซอร์ค้างหากข้อมูลเกิน 5,000 จุด
 if total_points > 5000:
   st.warning(
       f"⚠️ ข้อมูลมีจำนวนมากถึง {total_points:,} จุด เพื่อความรวดเร็วในการแสดงผล"
@@ -153,9 +149,11 @@ if not map_df.empty:
 else:
   center_lat, center_lon = 13.7563, 100.5018
 
-# สร้างแผนที่ฐานแบบไร้รอยต่อ (ไม่ต้องใช้ API Key)
+# สร้างแผนที่ด้วย OpenStreetMap (Tiles มาตรฐาน ฟรี และไม่ต้องใช้ API Key)
 m = folium.Map(
-    location=[center_lat, center_lon], zoom_start=10, tiles="CartoDB positron"
+    location=[center_lat, center_lon],
+    zoom_start=10,
+    tiles="OpenStreetMap",
 )
 
 
@@ -196,13 +194,13 @@ unique_cats = (
 )
 color_map = get_color_mapping(unique_cats)
 
-# วาดหมุดวงกลมพิกัด (CircleMarker) เพื่อความเร็วสูงสุดในการเรนเดอร์
+# วาดหมุดวงกลมพิกัด (CircleMarker)
 for idx, row in map_df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
   cat_val = str(row.get(color_col, "default"))
   pin_color = color_map.get(cat_val, "#2563eb")
 
-  # ข้อความเมื่อเอาเมาส์ชี้ (Tooltip) แสดงผลทันทีโดยไม่ต้องคลิก
+  # ข้อความเมื่อเอาเมาส์ชี้ (Tooltip)
   tooltip_text = (
       f"รหัส: {row.get('รหัสสมาชิก', '-')}, ชื่อ: {row.get('ชื่อ-นามสกุล', '-')},"
       f" คลัง: {row.get('คลัง', '-')}, รถ: {row.get('เบอร์รถ', '-')}"
