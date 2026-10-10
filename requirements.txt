@@ -2,6 +2,4 @@ streamlit
 pandas
 streamlit-folium
 folium
-gspread
-oauth2client
 requests
