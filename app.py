@@ -1,12 +1,15 @@
 from urllib.parse import quote
 import folium
+from folium.plugins import FastMarkerCluster
 import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 
 # ตั้งค่าหน้าเว็บ Streamlit (Layout กว้างเต็มจอ)
 st.set_page_config(
-    page_title="ระบบแผนที่จัดส่งสินค้า", page_icon="🗺️", layout="wide"
+    page_title="ระบบแผนที่จัดส่งสินค้า (High Performance)",
+    page_icon="🗺️",
+    layout="wide",
 )
 
 # ตกแต่ง UI เล็กน้อย
@@ -25,7 +28,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (โหมดความเร็วสูง)</div>',
     unsafe_allow_html=True,
 )
 
@@ -34,7 +37,7 @@ SHEET_ID = "1Ze82Uc0r179gcGvfCyE4KsrK5n8wFTAzZmLh1If1-9A"
 SHEET_NAME = "ข้อมูล"
 
 
-# ฟังก์ชันโหลดข้อมูลพร้อมแคชระดับสูง (โหลดเร็ว)
+# 1. โหลดข้อมูลแบบแคชระดับสูง
 @st.cache_data(ttl=600, show_spinner=False)
 def load_data():
   encoded_sheet_name = quote(SHEET_NAME)
@@ -43,43 +46,35 @@ def load_data():
   return df
 
 
-# โหลดข้อมูลแบบปลอดภัย
 try:
-  with st.spinner("กำลังโหลดข้อมูลจาก Google Sheets..."):
+  with st.spinner(
+      "กำลังโหลดข้อมูลจำนวนมากจาก Google Sheets กรุณารอสักครู่..."
+  ):
     df = load_data()
 except Exception as e:
   st.error(f"❌ ไม่สามารถโหลดข้อมูลจาก Google Sheets ได้: {e}")
-  st.info(
-      "คำแนะนำ: ตรวจสอบว่าลิงก์ Google Sheets เปิดแชร์สิทธิ์เป็น 'Anyone with"
-      " the link can view' หรือยัง"
-  )
   st.stop()
 
-# ตรวจสอบคอลัมน์พิกัด
 if "พิกัด GPS" not in df.columns:
   st.error("❌ ไม่พบคอลัมน์ 'พิกัด GPS' ในไฟล์ Google Sheets")
   st.stop()
 
-# ทำความสะอาดข้อมูลพิกัดเบื้องต้น
+# กรองแถวที่ไม่มีพิกัดออกอย่างรวดเร็ว
 df = df.dropna(subset=["พิกัด GPS"])
 df = df[df["พิกัด GPS"].str.contains(",", na=False)]
 
 
-# ฟังก์ชันแปลงพิกัดอย่างรวดเร็วและปลอดภัย
+# 2. แปลงพิกัดแบบความเร็วสูง (Vectorized / Optimized parsing)
 @st.cache_data(show_spinner=False)
 def process_coordinates(data_frame):
-  lats = []
-  lons = []
-  for val in data_frame["พิกัด GPS"]:
-    try:
-      parts = str(val).split(",")
-      lats.append(float(parts[0].strip()))
-      lons.append(float(parts[1].strip()))
-    except:
-      lats.append(None)
-      lons.append(None)
-  data_frame["lat"] = lats
-  data_frame["lon"] = lons
+  # แยกสตริงพิกัดแบบรวดเร็ว
+  split_coords = data_frame["พิกัด GPS"].str.split(",", expand=True)
+  if split_coords.shape[1] >= 2:
+    data_frame["lat"] = pd.to_numeric(split_coords[0], errors="coerce")
+    data_frame["lon"] = pd.to_numeric(split_coords[1], errors="coerce")
+  else:
+    data_frame["lat"] = None
+    data_frame["lon"] = None
   return data_frame.dropna(subset=["lat", "lon"])
 
 
@@ -137,95 +132,43 @@ row_limit = st.sidebar.selectbox(
 
 
 # ==========================================
-# 1. ส่วนแผนที่ (อยู่ด้านบน)
+# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - ใช้ FastMarkerCluster โหลดเร็วสูงสุด)
 # ==========================================
-st.subheader("🗺️ แผนที่แสดงตำแหน่งพิกัดทั้งหมด")
+st.subheader(
+    f"🗺️ แผนที่แสดงพิกัดทั้งหมด (จำนวน {len(filtered_df):,} จุดตามตัวกรอง)"
+)
 
 map_df = filtered_df.reset_index(drop=True)
 
 if not map_df.empty:
-  center_lat = map_df["lat"].astype(float).mean()
-  center_lon = map_df["lon"].astype(float).mean()
+  center_lat = map_df["lat"].mean()
+  center_lon = map_df["lon"].mean()
 else:
   center_lat, center_lon = 13.7563, 100.5018
 
+# สร้างแผนที่พื้นฐาน
 m = folium.Map(
-    location=[center_lat, center_lon], zoom_start=11, tiles="CartoDB positron"
+    location=[center_lat, center_lon], zoom_start=10, tiles="CartoDB positron"
 )
 
-
-def get_color_mapping(categories):
-  colors = [
-      "blue",
-      "darkblue",
-      "cadetblue",
-      "purple",
-      "darkpurple",
-      "pink",
-      "orange",
-      "lightred",
-      "beige",
-      "green",
-      "darkgreen",
-      "lightgreen",
-  ]
-  return {
-      str(cat): colors[i % len(colors)] for i, cat in enumerate(categories)
-  }
-
-
-if "หน้า 1" in page:
-  color_col = "คลัง"
-elif "หน้า 2" in page:
-  color_col = "เบอร์รถ"
-else:
-  color_col = (
-      "รอบส่งประจำสัปดาห์"
-      if "รอบส่งประจำสัปดาห์" in map_df.columns
-      else "คลัง"
+# เตรียมข้อมูลพิกัดสำหรับ FastMarkerCluster (รองรับข้อมูลแสนจุดโดยไม่กระตุก)
+# สร้างลิสต์ของ [lat, lon, popup_text]
+marker_data = []
+for idx, row in map_df.iterrows():
+  popup_info = (
+      f"<b>รหัส:</b> {row.get('รหัสสมาชิก', '-')}<br>"
+      f"<b>ชื่อ:</b> {row.get('ชื่อ-นามสกุล', '-')}<br>"
+      f"<b>คลัง:</b> {row.get('คลัง', '-')}<br>"
+      f"<b>เบอร์รถ:</b> {row.get('เบอร์รถ', '-')}<br>"
+      f"<b>รอบส่ง:</b> {row.get('รอบส่งประจำสัปดาห์', '-')}"
+  )
+  marker_data.append(
+      [float(row["lat"]), float(row["lon"]), popup_info]
   )
 
-unique_cats = (
-    map_df[color_col].dropna().unique().tolist()
-    if color_col in map_df.columns
-    else []
-)
-color_map = get_color_mapping(unique_cats)
-
-# วาดหมุดลงบนแผนที่ (แสดงทุกพิกัดตามตัวกรองทันที)
-for idx, row in map_df.iterrows():
-  lat, lon = float(row["lat"]), float(row["lon"])
-  cat_val = str(row.get(color_col, "default"))
-  pin_color = color_map.get(cat_val, "blue")
-
-  # เอาเมาส์ชี้ (Tooltip) แสดงรายละเอียดทันทีโดยไม่ต้องคลิก
-  tooltip_html = f"""
-    <b>รหัส:</b> {row.get('รหัสสมาชิก', '-')}<br>
-    <b>ชื่อ:</b> {row.get('ชื่อ-นามสกุล', '-')}<br>
-    <b>คลัง:</b> {row.get('คลัง', '-')}<br>
-    <b>เบอร์รถ:</b> {row.get('เบอร์รถ', '-')}<br>
-    <b>รอบส่ง:</b> {row.get('รอบส่งประจำสัปดาห์', '-')}
-    """
-
-  # คลิกเพื่อดูรายละเอียดเพิ่มเติมแบบเต็ม (Popup ขนาดกว้าง)
-  popup_html = f"""
-    <div style="width: 200px; font-size: 12px; font-family: sans-serif; background-color: #ffffff; padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1;">
-        <b>รหัสสมาชิก:</b> {row.get('รหัสสมาชิก', '-')}<br>
-        <b>ชื่อ-นามสกุล:</b> {row.get('ชื่อ-นามสกุล', '-')}<br>
-        <b>ที่อยู่:</b> {row.get('ที่อยู่จัดส่ง บ้านเลขที่/อาคาร', '-')}<br>
-        <b>คลัง:</b> {row.get('คลัง', '-')}<br>
-        <b>เบอร์รถ:</b> {row.get('เบอร์รถ', '-')}<br>
-        <b>รอบส่ง:</b> {row.get('รอบส่งประจำสัปดาห์', '-')}<br>
-        <b>ยอดส่ง:</b> {row.get('ยอดส่ง/เดือน ( ก.ย.69)', '-')}
-    </div>
-    """
-
-  folium.Marker(
-      location=[lat, lon],
-      popup=folium.Popup(popup_html, max_width=300),
-      tooltip=folium.Tooltip(tooltip_html, sticky=True),
-      icon=folium.Icon(color=pin_color, icon="info-sign"),
-  ).add_to(m)
+# ใช้ FastMarkerCluster เพื่อรวมจุดและเรนเดอร์ความเร็วสูง
+if marker_data:
+  FastMarkerCluster(marker_data).add_to(m)
 
 # แสดงแผนที่ด้านบน
 st_data = st_folium(m, width="100%", height=500)
@@ -248,7 +191,7 @@ display_cols = [
         "ที่อยู่จัดส่ง บ้านเลขที่/อาคาร",
         "คลัง",
         "เบอร์รถ",
-        "รอบส่งประจำสัปดาห์",
+        "รอบส่งประจำสัปedarห์",
         "ยอดส่ง/เดือน ( ก.ย.69)",
     ]
     if c in filtered_df.columns
@@ -260,5 +203,4 @@ if not filtered_df.empty:
       table_df.head(int(row_limit)) if row_limit != "ทั้งหมด" else table_df
   )
 
-  # แสดงตารางแบบปกติ (ปลอดภัย ไม่ทำให้แอปพัง)
   st.dataframe(table_display, use_container_width=True)
