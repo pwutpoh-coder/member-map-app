@@ -11,7 +11,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# ตกแต่ง UI เล็กน้อย
+# ตกแต่ง UI ด้วย CSS กำหนดโทนสีปุ่มและธีมเป็น "เทาน้ำเงิน" (Slate / Navy) แทนสีแดง
 st.markdown(
     """
     <style>
@@ -21,13 +21,18 @@ st.markdown(
             color: #1e293b;
             margin-bottom: 5px;
         }
+        /* ปรับแต่งสีปุ่ม Multiselect / Tags ให้เป็นโทนเทาน้ำเงิน */
+        .stMultiSelect [data-baseweb="tag"] {
+            background-color: #334155 !important;
+            color: white !important;
+        }
     </style>
 """,
     unsafe_allow_html=True,
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (โหมดคัดกรองล่วงหน้าเพื่อความเร็ว)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (โหมดความเร็วสูง - ธีมเทาน้ำเงิน)</div>',
     unsafe_allow_html=True,
 )
 
@@ -76,26 +81,27 @@ def process_coordinates(data_frame):
 
 df = process_coordinates(df)
 
-# --- Sidebar: ตัวกรองข้อมูลหลัก (บังคับเลือกสาขา/คลังก่อนเพื่อความเร็ว) ---
+# --- Sidebar: ตัวกรองข้อมูลหลัก (เลือกคลังสินค้า) ---
 st.sidebar.header("🔍 ตัวกรองหลักเพื่อความเร็ว")
 
 all_warehouses = (
     df["คลัง"].dropna().unique().tolist() if "คลัง" in df.columns else []
 )
-# แก้ไข syntax ให้ถูกต้อง: เลือกคลังแรกเป็นค่าเริ่มต้น
 default_wh = [all_warehouses[0]] if all_warehouses else []
 
+# ใช้ multiselect พร้อม Key เพื่อป้องกันการค้างของ State เวลาเปลี่ยนค่า
 selected_warehouses = st.sidebar.multiselect(
     "1. เลือกคลังสินค้าที่ต้องการแสดง (เลือกได้หลายคลัง):",
     all_warehouses,
     default=default_wh,
+    key="warehouse_filter_key",
 )
 
-# กรองข้อมูลตามคลังที่เลือกในเบื้องต้น
+# กรองข้อมูลตามคลังที่เลือก
 if selected_warehouses:
   filtered_df = df[df["คลัง"].isin(selected_warehouses)]
 else:
-  filtered_df = df.iloc[0:0]  # ถ้ายังไม่เลือก ให้เป็นตารางว่าง
+  filtered_df = df.iloc[0:0]
 
 # ตัวกรองย่อยเพิ่มเติม (เบอร์รถ / รอบส่ง)
 st.sidebar.markdown("---")
@@ -106,14 +112,18 @@ trucks = (
     if "เบอร์รถ" in filtered_df.columns
     else ["ทั้งหมด"]
 )
-sel_truck = st.sidebar.selectbox("เลือกเบอร์รถ", trucks, index=0)
+sel_truck = st.sidebar.selectbox(
+    "เลือกเบอร์รถ", trucks, index=0, key="truck_filter_key"
+)
 
 rounds = (
     ["ทั้งหมด"] + filtered_df["รอบส่งประจำสัปดาห์"].dropna().unique().tolist()
     if "รอบส่งประจำสัปดาห์" in filtered_df.columns
     else ["ทั้งหมด"]
 )
-sel_round = st.sidebar.selectbox("เลือกรอบส่งประจำสัปดาห์", rounds, index=0)
+sel_round = st.sidebar.selectbox(
+    "เลือกรอบส่งประจำสัปดาห์", rounds, index=0, key="round_filter_key"
+)
 
 # กรองข้อมูลซ้ำตามตัวกรองย่อย
 if sel_truck != "ทั้งหมด":
@@ -130,12 +140,16 @@ page = st.sidebar.radio(
         "หน้า 2: แยกสีตาม 'เบอร์รถ'",
         "หน้า 3: แยกสีตาม 'ยอดส่งประจำสัปดาห์'",
     ],
+    key="page_selector_key",
 )
 
 # --- ตั้งค่าจำนวนแถวแสดงผลตารางด้านล่าง ---
 st.sidebar.markdown("---")
 row_limit = st.sidebar.selectbox(
-    "⚡ แสดงตารางด้านล่างครั้งละ (แถว):", [50, 100, 500, "ทั้งหมด"], index=0
+    "⚡ แสดงตารางด้านล่างครั้งละ (แถว):",
+    [50, 100, 500, "ทั้งหมด"],
+    index=0,
+    key="row_limit_key",
 )
 
 
@@ -149,7 +163,7 @@ st.subheader(
 
 map_df = filtered_df.reset_index(drop=True)
 
-# กำหนดขีดจำกัดไม่เกิน 20,000 จุดตามเงื่อนไข
+# กำหนดขีดจำกัดความปลอดภัยไม่เกิน 20,000 จุด
 MAX_POINTS = 20000
 if total_points > MAX_POINTS:
   st.warning(
@@ -172,19 +186,19 @@ m = folium.Map(
 )
 
 
-# ฟังก์ชันกำหนดสีตามหมวดหมู่
+# ฟังก์ชันกำหนดสีตามหมวดหมู่ (โทนสีเทาน้ำเงิน/พาสเทลสุภาพ)
 def get_color_mapping(categories):
   colors = [
-      "#2563eb",
-      "#dc2626",
-      "#16a34a",
-      "#9333ea",
-      "#ea580c",
-      "#0891b2",
-      "#4f46e5",
-      "#ca8a04",
+      "#334155",
+      "#1e40af",
+      "#0369a1",
+      "#0f766e",
+      "#374151",
+      "#475569",
+      "#1d4ed8",
+      "#0284c7",
       "#0d9488",
-      "#be185d",
+      "#4b5563",
   ]
   return {
       str(cat): colors[i % len(colors)] for i, cat in enumerate(categories)
@@ -213,7 +227,7 @@ color_map = get_color_mapping(unique_cats)
 for idx, row in map_df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
   cat_val = str(row.get(color_col, "default"))
-  pin_color = color_map.get(cat_val, "#2563eb")
+  pin_color = color_map.get(cat_val, "#334155")
 
   # ข้อความเมื่อเอาเมาส์ชี้ (Tooltip)
   tooltip_text = (
