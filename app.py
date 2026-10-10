@@ -6,12 +6,12 @@ from streamlit_folium import st_folium
 
 # ตั้งค่าหน้าเว็บ Streamlit (Layout กว้างเต็มจอ)
 st.set_page_config(
-    page_title="ระบบแผนที่จัดส่งสินค้า (High Performance)",
+    page_title="ระบบแผนที่จัดส่งสินค้า (Ultra Fast)",
     page_icon="🗺️",
     layout="wide",
 )
 
-# ตกแต่ง UI ด้วย CSS กำหนดโทนสีปุ่มและธีมเป็น "เทาน้ำเงิน" (Slate / Navy) แทนสีแดง
+# ตกแต่ง UI ด้วย CSS กำหนดโทนสีปุ่มและธีมเป็น "เทาน้ำเงิน" (Slate / Navy)
 st.markdown(
     """
     <style>
@@ -21,7 +21,6 @@ st.markdown(
             color: #1e293b;
             margin-bottom: 5px;
         }
-        /* ปรับแต่งสีปุ่ม Multiselect / Tags ให้เป็นโทนเทาน้ำเงิน */
         .stMultiSelect [data-baseweb="tag"] {
             background-color: #334155 !important;
             color: white !important;
@@ -32,7 +31,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (โหมดความเร็วสูง - ธีมเทาน้ำเงิน)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (โหมดความเร็วสูงสุด ไม่ค้าง)</div>',
     unsafe_allow_html=True,
 )
 
@@ -41,18 +40,69 @@ SHEET_ID = "1Ze82Uc0r179gcGvfCyE4KsrK5n8wFTAzZmLh1If1-9A"
 SHEET_NAME = "ข้อมูล"
 
 
-# 1. โหลดข้อมูลแบบแคชระดับสูง
+# 1. โหลดเฉพาะรายชื่อคลังทั้งหมดก่อน (โหลดเร็วมากเพราะอ่านแค่คอลัมน์คลัง)
 @st.cache_data(ttl=600, show_spinner=False)
-def load_data():
+def load_warehouse_list():
   encoded_sheet_name = quote(SHEET_NAME)
-  url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded_sheet_name}"
+  # ดึงเฉพาะคอลัมน์คลัง (คอลัมน์ E) เพื่อมาสร้างเมนูตัวเลือก
+  url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded_sheet_name}&tq=select%20E"
+  df = pd.read_csv(url, encoding="utf-8", dtype=str)
+  # คืนค่ารายการคลังที่ไม่ซ้ำกัน
+  if not df.empty and "คลัง" in df.columns:
+    return sorted(df["คลัง"].dropna().unique().tolist())
+  return []
+
+
+try:
+  all_warehouses = load_warehouse_list()
+except Exception as e:
+  all_warehouses = []
+
+# --- Sidebar: ตัวกรองหลักเลือกคลังสินค้า ---
+st.sidebar.header("🔍 ตัวกรองหลัก (เพื่อความเร็วสูงสุด)")
+
+if all_warehouses:
+  default_wh = [all_warehouses[0]]
+else:
+  default_wh = []
+
+selected_warehouses = st.sidebar.multiselect(
+    "1. เลือกคลังสินค้า (เลือกได้หลายคลัง):",
+    all_warehouses,
+    default=default_wh,
+    key="warehouse_filter_key",
+)
+
+
+# 2. ฟังก์ชันโหลดข้อมูลเฉพาะคลังที่ถูกเลือก (Query เฉพาะข้อมูลที่จำเป็น ไม่โหลดทั้งหมด 1.4 แสนแถว)
+@st.cache_data(ttl=600, show_spinner=False)
+def load_data_by_warehouses(warehouses_tuple):
+  if not warehouses_tuple:
+    return pd.DataFrame()
+
+  encoded_sheet_name = quote(SHEET_NAME)
+  # สร้างเงื่อนไข SQL สำหรับ Google Visualization API เพื่อดึงเฉพาะคลังที่ผู้ใช้เลือก
+  wh_conditions = " or ".join([f"E = '{wh}'" for wh in warehouses_tuple])
+  query = f"select * where {wh_conditions}"
+  encoded_query = quote(query)
+
+  url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded_sheet_name}&tq={encoded_query}"
+
   df = pd.read_csv(url, encoding="utf-8", dtype=str, low_memory=False)
   return df
 
 
+if not selected_warehouses:
+  st.warning(
+      "⚠️ กรุณาเลือกคลังสินค้าอย่างน้อย 1 คลังในแถบด้านข้าง (Sidebar)"
+      " เพื่อเริ่มแสดงข้อมูล"
+  )
+  st.stop()
+
+# โหลดข้อมูลเฉพาะคลังที่เลือก (ทำให้โหลดเสร็จภายใน 1-2 วินาที ไม่ค้าง)
 try:
-  with st.spinner("กำลังโหลดข้อมูลจาก Google Sheets..."):
-    df = load_data()
+  with st.spinner("กำลังดึงข้อมูลเฉพาะคลังที่เลือกอย่างรวดเร็ว..."):
+    df = load_data_by_warehouses(tuple(selected_warehouses))
 except Exception as e:
   st.error(f"❌ ไม่สามารถโหลดข้อมูลจาก Google Sheets ได้: {e}")
   st.stop()
@@ -61,12 +111,12 @@ if "พิกัด GPS" not in df.columns:
   st.error("❌ ไม่พบคอลัมน์ 'พิกัด GPS' ในไฟล์ Google Sheets")
   st.stop()
 
-# กรองแถวที่ไม่มีพิกัดออกอย่างรวดเร็ว
+# กรองแถวที่ไม่มีพิกัดออก
 df = df.dropna(subset=["พิกัด GPS"])
 df = df[df["พิกัด GPS"].str.contains(",", na=False)]
 
 
-# 2. แปลงพิกัดแบบความเร็วสูง (Vectorized Parsing)
+# ฟังก์ชันแปลงพิกัดแบบรวดเร็ว (Vectorized Parsing)
 @st.cache_data(show_spinner=False)
 def process_coordinates(data_frame):
   split_coords = data_frame["พิกัด GPS"].str.split(",", expand=True)
@@ -81,35 +131,13 @@ def process_coordinates(data_frame):
 
 df = process_coordinates(df)
 
-# --- Sidebar: ตัวกรองข้อมูลหลัก (เลือกคลังสินค้า) ---
-st.sidebar.header("🔍 ตัวกรองหลักเพื่อความเร็ว")
-
-all_warehouses = (
-    df["คลัง"].dropna().unique().tolist() if "คลัง" in df.columns else []
-)
-default_wh = [all_warehouses[0]] if all_warehouses else []
-
-# ใช้ multiselect พร้อม Key เพื่อป้องกันการค้างของ State เวลาเปลี่ยนค่า
-selected_warehouses = st.sidebar.multiselect(
-    "1. เลือกคลังสินค้าที่ต้องการแสดง (เลือกได้หลายคลัง):",
-    all_warehouses,
-    default=default_wh,
-    key="warehouse_filter_key",
-)
-
-# กรองข้อมูลตามคลังที่เลือก
-if selected_warehouses:
-  filtered_df = df[df["คลัง"].isin(selected_warehouses)]
-else:
-  filtered_df = df.iloc[0:0]
-
-# ตัวกรองย่อยเพิ่มเติม (เบอร์รถ / รอบส่ง)
+# ตัวกรองย่อยเพิ่มเติม (เบอร์รถ / รอบส่ง) จากข้อมูลคลังที่ดึงมาแล้ว
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ ตัวกรองเพิ่มเติม")
 
 trucks = (
-    ["ทั้งหมด"] + filtered_df["เบอร์รถ"].dropna().unique().tolist()
-    if "เบอร์รถ" in filtered_df.columns
+    ["ทั้งหมด"] + df["เบอร์รถ"].dropna().unique().tolist()
+    if "เบอร์รถ" in df.columns
     else ["ทั้งหมด"]
 )
 sel_truck = st.sidebar.selectbox(
@@ -117,8 +145,8 @@ sel_truck = st.sidebar.selectbox(
 )
 
 rounds = (
-    ["ทั้งหมด"] + filtered_df["รอบส่งประจำสัปดาห์"].dropna().unique().tolist()
-    if "รอบส่งประจำสัปดาห์" in filtered_df.columns
+    ["ทั้งหมด"] + df["รอบส่งประจำสัปดาห์"].dropna().unique().tolist()
+    if "รอบส่งประจำสัปดาห์" in df.columns
     else ["ทั้งหมด"]
 )
 sel_round = st.sidebar.selectbox(
@@ -126,6 +154,7 @@ sel_round = st.sidebar.selectbox(
 )
 
 # กรองข้อมูลซ้ำตามตัวกรองย่อย
+filtered_df = df.copy()
 if sel_truck != "ทั้งหมด":
   filtered_df = filtered_df[filtered_df["เบอร์รถ"] == sel_truck]
 if sel_round != "ทั้งหมด":
@@ -154,7 +183,7 @@ row_limit = st.sidebar.selectbox(
 
 
 # ==========================================
-# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - จำกัดไม่เกิน 20,000 จุด เพื่อความเร็วสูงสุด)
+# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - โหลดไว ไม่มีสะดุด)
 # ==========================================
 total_points = len(filtered_df)
 st.subheader(
@@ -163,7 +192,7 @@ st.subheader(
 
 map_df = filtered_df.reset_index(drop=True)
 
-# กำหนดขีดจำกัดความปลอดภัยไม่เกิน 20,000 จุด
+# จำกัดจุดสูงสุดไม่เกิน 20,000 จุดเพื่อความปลอดภัยของเบราว์เซอร์
 MAX_POINTS = 20000
 if total_points > MAX_POINTS:
   st.warning(
@@ -186,7 +215,7 @@ m = folium.Map(
 )
 
 
-# ฟังก์ชันกำหนดสีตามหมวดหมู่ (โทนสีเทาน้ำเงิน/พาสเทลสุภาพ)
+# ฟังก์ชันกำหนดสีตามหมวดหมู่ (โทนสีเทาน้ำเงิน)
 def get_color_mapping(categories):
   colors = [
       "#334155",
