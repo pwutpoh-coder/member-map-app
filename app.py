@@ -108,7 +108,7 @@ rounds = (
 )
 sel_round = st.sidebar.selectbox("เลือกรอบส่งประจำสัปดาห์", rounds, index=0)
 
-# กรองข้อมูล
+# กรองข้อมูลตาม Dropdown
 filtered_df = df.copy()
 if sel_warehouse != "ทั้งหมด":
   filtered_df = filtered_df[filtered_df["คลัง"] == sel_warehouse]
@@ -117,7 +117,7 @@ if sel_truck != "ทั้งหมด":
 if sel_round != "ทั้งหมด":
   filtered_df = filtered_df[filtered_df["รอบส่งประจำสัปดาห์"] == sel_round]
 
-# --- เลือกหน้า ---
+# --- เลือกหน้า (แยกสี 3 หน้า) ---
 st.sidebar.markdown("---")
 page = st.sidebar.radio(
     "📊 เลือกมุมมองแผนที่แยกสี",
@@ -128,17 +128,17 @@ page = st.sidebar.radio(
     ],
 )
 
-# --- ตั้งค่าจำนวนแถวแสดงผล ---
+# --- ตั้งค่าจำนวนแถวแสดงผลตาราง (เพื่อให้ระบบโหลดเร็ว แต่แผนที่จะแสดงทั้งหมด) ---
 st.sidebar.markdown("---")
 row_limit = st.sidebar.selectbox(
     "⚡ แสดงตารางครั้งละ (แถว):", [50, 100, 500, "ทั้งหมด"], index=0
 )
 
-# --- ตารางข้อมูลและการเลือกพิกัด ---
+# --- ส่วนตารางข้อมูลและการเลือกพิกัด ---
 st.subheader("📋 รายละเอียดข้อมูลและเลือกพิกัด")
 st.info(
     "💡 คลิกเลือกแถวในตารางด้านล่างเพื่อเน้นพิกัดบนแผนที่"
-    " (พิกัดอื่นจะเปลี่ยนเป็นสีเทา)"
+    " (พิกัดอื่นจะเปลี่ยนเป็นสีเทา) *หมายเหตุ: บนแผนที่แสดงพิกัดทั้งหมดตามตัวกรอง*"
 )
 
 display_cols = [
@@ -156,6 +156,8 @@ display_cols = [
 ]
 
 selected_indices = []
+table_display = pd.DataFrame()
+
 if not filtered_df.empty:
   table_df = filtered_df[display_cols].reset_index(drop=True)
   table_display = (
@@ -172,12 +174,13 @@ if not filtered_df.empty:
 
   if event and "selection" in event and "rows" in event["selection"]:
     selected_row_positions = event["selection"]["rows"]
+    # แปลง index ของตารางที่แสดง ให้ตรงกับ index ใน filtered_df จริงๆ
     selected_indices = table_display.index[selected_row_positions].tolist()
 
-map_df = filtered_df.reset_index(drop=True)
+# --- สร้างแผนที่ (แสดงพิกัดทั้งหมดจาก filtered_df โดยไม่จำกัดด้วยแถวของตาราง) ---
+st.subheader("🗺️ แผนที่แสดงตำแหน่งพิกัดทั้งหมด")
 
-# --- สร้างแผนที่ ---
-st.subheader("🗺️ แผนที่แสดงตำแหน่งพิกัด")
+map_df = filtered_df.reset_index(drop=True)
 
 if not map_df.empty:
   center_lat = map_df["lat"].astype(float).mean()
@@ -228,21 +231,39 @@ unique_cats = (
 )
 color_map = get_color_mapping(unique_cats)
 
-# ป้องกันแผนที่ค้างหากจุดเยอะเกินไป
-render_df = map_df.head(1000) if len(map_df) > 1000 else map_df
-
-for idx, row in render_df.iterrows():
+# วาดหมุดทั้งหมดใน map_df ลงบนแผนที่ (แสดงทุกพิกัดตามตัวกรอง)
+for idx, row in map_df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
-  is_selected = (not selected_indices) or (idx in selected_indices)
+
+  # ตรวจสอบว่าแถวนี้ถูกเลือกในตารางหรือไม่
+  # เนื่องจาก table_display อาจแสดงแค่ 50 แถว แต่ map_df มีทั้งหมด
+  # เราจะตรวจสอบว่าถ้ารายการนั้นอยู่ใน selected_indices (อิงจาก table_display) หรือถ้าไม่มีการเลือกเลย ให้แสดงสีปกติ
+  is_selected = True
+  if selected_indices:
+    # ค้นหาว่า idx นี้ตรงกับแถวที่ถูกเลือกในตารางหรือไม่
+    if idx in selected_indices:
+      is_selected = True
+    else:
+      is_selected = False
 
   if is_selected:
     cat_val = str(row.get(color_col, "default"))
     pin_color = color_map.get(cat_val, "blue")
   else:
-    pin_color = "gray"
+    pin_color = "gray"  # เปลี่ยนเป็นสีเทาเมื่อไม่ได้เลือกในตาราง
 
-  detail_html = f"""
-    <div style="width: 200px; font-size: 12px; font-family: sans-serif; background-color: #ffffff; padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1; box-shadow: 0px 2px 6px rgba(0,0,0,0.15);">
+  # เนื้อหาที่จะแสดงเมื่อเอาเมาส์ชี้ (Tooltip / Hover) โดยไม่ต้องกดคลิก
+  tooltip_html = f"""
+    <b>รหัส:</b> {row.get('รหัสสมาชิก', '-')}<br>
+    <b>ชื่อ:</b> {row.get('ชื่อ-นามสกุล', '-')}<br>
+    <b>คลัง:</b> {row.get('คลัง', '-')}<br>
+    <b>เบอร์รถ:</b> {row.get('เบอร์รถ', '-')}<br>
+    <b>รอบส่ง:</b> {row.get('รอบส่งประจำสัปดาห์', '-')}
+    """
+
+  # กล่องรายละเอียดเพิ่มเติมเมื่อคลิกหมุด (Popup)
+  popup_html = f"""
+    <div style="width: 200px; font-size: 12px; font-family: sans-serif; background-color: #ffffff; padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1;">
         <b>รหัสสมาชิก:</b> {row.get('รหัสสมาชิก', '-')}<br>
         <b>ชื่อ-นามสกุล:</b> {row.get('ชื่อ-นามสกุล', '-')}<br>
         <b>ที่อยู่:</b> {row.get('ที่อยู่จัดส่ง บ้านเลขที่/อาคาร', '-')}<br>
@@ -255,11 +276,10 @@ for idx, row in render_df.iterrows():
 
   folium.Marker(
       location=[lat, lon],
-      popup=folium.Popup(detail_html, max_width=300),
-      tooltip=folium.Tooltip(
-          f"คลิกดูรายละเอียด: {row.get('ชื่อ-นามสกุล', '')}", sticky=True
-      ),
+      popup=folium.Popup(popup_html, max_width=300),
+      tooltip=folium.Tooltip(tooltip_html, sticky=True),
       icon=folium.Icon(color=pin_color, icon="info-sign"),
   ).add_to(m)
 
+# เรนเดอร์แผนที่ลงบน Streamlit
 st_data = st_folium(m, width="100%", height=550)
