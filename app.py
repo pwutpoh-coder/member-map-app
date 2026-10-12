@@ -41,7 +41,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (โหมดกำหนดสีตามรอบส่งและตัวเลือกการแสดงผล)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (เลือกสไตล์แผนที่ & ลดขนาดจุดพิกัด)</div>',
     unsafe_allow_html=True,
 )
 
@@ -142,6 +142,15 @@ page = st.sidebar.radio(
     key="page_selector_key",
 )
 
+# --- ตัวเลือกสไตล์แผนที่ (ปกติ หรือ สีเงิน) ---
+st.sidebar.markdown("---")
+map_theme = st.sidebar.radio(
+    "🗺️ เลือกสไตล์แผนที่:",
+    ["ปกติ (OpenStreetMap)", "สีเงิน / โทนเทา (CartoDB Positron)"],
+    index=1,  # ค่าเริ่มต้นเป็นสีเงินเพื่อความสบายตา
+    key="map_theme_key",
+)
+
 # --- ตัวกรองย่อยเพิ่มเติม (เบอร์รถ / รอบส่ง) ---
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ ตัวกรองเพิ่มเติมและเงื่อนไขการแสดงผล")
@@ -164,19 +173,19 @@ sel_round = st.sidebar.selectbox(
     "เลือกรอบส่งประจำสัปดาห์", rounds, index=0, key="round_filter_key"
 )
 
-# ทางเลือกการแสดงผลเมื่อใช้ตัวกรองย่อย (ตามโจทย์)
+# ทางเลือกการแสดงผลเมื่อใช้ตัวกรองย่อย
 st.sidebar.markdown("---")
 filter_display_mode = st.sidebar.radio(
     "รูปแบบการแสดงผลจุดที่ไม่ได้เลือกในตัวกรอง:",
     [
-        "ซ่อนจุดที่ไม่เลือก (หายไปไม่ปรากฏ)",
+        "ซ่อนจุดที่ไม่เลือก (หายไปไม่ปรากฎ)",
         "แสดงจุดที่ไม่เลือกเป็น 'สีเทาอ่อน' (ดรอปลง)",
     ],
     index=0,
     key="filter_mode_key",
 )
 
-# แยกตารางสำหรับข้อมูลที่จะนำไปแสดงในตารางด้านล่าง (กรองเฉพาะที่ตรงกับตัวกรองย่อยเสมอ)
+# แยกตารางสำหรับข้อมูลที่จะนำไปแสดงในตารางด้านล่าง
 table_filtered_df = df.copy()
 if sel_truck != "ทั้งหมด":
   table_filtered_df = table_filtered_df[
@@ -204,8 +213,7 @@ st.subheader(
     f"🗺️ แผนที่แสดงพิกัด (คลัง: {selected_warehouse})"
 )
 
-# กำหนดกลุ่มข้อมูลที่จะแสดงบนแผนที่ตามทางเลือก (Mode)
-map_render_df = df.copy()  # นำข้อมูลทั้งหมดของคลังมาพิจารณา
+map_render_df = df.copy()
 
 if not map_render_df.empty:
   center_lat = map_render_df["lat"].mean()
@@ -213,18 +221,23 @@ if not map_render_df.empty:
 else:
   center_lat, center_lon = 13.7563, 100.5018
 
-# สร้างแผนที่ด้วย OpenStreetMap (ฟรี 100% ไม่ใช้ API Key)
+# กำหนด Tile ตามตัวเลือกสไตล์แผนที่ของผู้ใช้
+tile_provider = (
+    "OpenStreetMap"
+    if "ปกติ" in map_theme
+    else "CartoDB positron"  # ธีมสีเงิน/โทนเทาสะอาดตา
+)
+
 m = folium.Map(
     location=[center_lat, center_lon],
     zoom_start=11,
-    tiles="OpenStreetMap",
+    tiles=tile_provider,
 )
 
 
 # ฟังก์ชันกำหนดสีตามหน้า
 def get_color_mapping(categories, page_type):
   if page_type == "หน้า 3":
-    # กำหนดสีตามวันในสัปดาห์ตามโจทย์
     day_colors = {
         "จันทร์": "#ca8a04",  # สีเหลือง
         "อังคาร": "#be185d",  # สีชมพู
@@ -239,7 +252,6 @@ def get_color_mapping(categories, page_type):
     fallback_colors = ["#2563eb", "#0d9488", "#4f46e5", "#eab308"]
     for i, cat in enumerate(categories):
       cat_str = str(cat).strip()
-      # ตรวจสอบว่าตรงกับวันไหนไหม
       matched = False
       for day_key in day_colors:
         if day_key in cat_str:
@@ -250,7 +262,6 @@ def get_color_mapping(categories, page_type):
         mapping[cat_str] = fallback_colors[i % len(fallback_colors)]
     return mapping
   else:
-    # หน้า 1 และ หน้า 2 ใช้สีสันสดใส
     colors = [
         "#2563eb",
         "#dc2626",
@@ -262,6 +273,8 @@ def get_color_mapping(categories, page_type):
         "#ca8a04",
         "#0d9488",
         "#be185d",
+        "#22c55e",
+        "#eab308",
     ]
     return {
         str(cat): colors[i % len(colors)] for i, cat in enumerate(categories)
@@ -289,11 +302,10 @@ unique_cats = (
 )
 color_map = get_color_mapping(unique_cats, p_type)
 
-# วาดหมุดลงบนแผนที่
+# วาดหมุดลงบนแผนที่ (ลดขนาด radius เหลือ 3 เพื่อให้จุดเล็กลงสวยงาม)
 for idx, row in map_render_df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
 
-  # ตรวจสอบเงื่อนไขตัวกรองย่อย (เบอร์รถ / รอบส่ง)
   matches_truck = (
       (sel_truck == "All" or sel_truck == "ทั้งหมด")
       or (str(row.get("เบอร์รถ", "")) == sel_truck)
@@ -307,9 +319,8 @@ for idx, row in map_render_df.iterrows():
 
   if not is_fully_matched:
     if filter_display_mode == "ซ่อนจุดที่ไม่เลือก (หายไปไม่ปรากฎ)":
-      continue  # ข้ามไม่วาดหมุดนี้เลย
+      continue
     else:
-      # ทางเลือก: แสดงเป็นสีเทาอ่อนดรอปลง
       pin_color = "#94a3b8"
       opacity = 0.4
   else:
@@ -317,7 +328,6 @@ for idx, row in map_render_df.iterrows():
     pin_color = color_map.get(cat_val, "#2563eb")
     opacity = 0.9
 
-  # ข้อความ Tooltip กว้าง 5 ซม. (190px)
   tooltip_html = f"""
     <b>รหัส:</b> {row.get('รหัสสมาชิก', '-')}<br>
     <b>ชื่อ:</b> {row.get('ชื่อ-นามสกุล', '-')}<br>
@@ -329,7 +339,7 @@ for idx, row in map_render_df.iterrows():
 
   folium.CircleMarker(
       location=[lat, lon],
-      radius=5,
+      radius=3,  # ลดขนาดพิกัดให้เล็กลงตามต้องการ
       color=pin_color,
       fill=True,
       fill_color=pin_color,
