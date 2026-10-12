@@ -41,7 +41,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (เลือกสไตล์แผนที่ & แยกสีตามหน้า)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (แผนที่ปกติ OpenStreetMap)</div>',
     unsafe_allow_html=True,
 )
 
@@ -154,20 +154,6 @@ page = st.sidebar.radio(
     key="page_selector_key",
 )
 
-# --- ตัวเลือกสไตล์แผนที่ (เลือกได้ระหว่างสีเทาจางกับปกติ) ---
-st.sidebar.markdown("---")
-map_theme = st.sidebar.radio(
-    "🗺️ เลือกสไตล์แผนที่:",
-    [
-        (
-            "แผนที่สีจาง (CartoDB Positron - แนะนำไม่ให้สีแผนที่ทับกับสีพิกัด)"
-        ),
-        "แผนที่ปกติ (OpenStreetMap)",
-    ],
-    index=0,
-    key="map_theme_key",
-)
-
 # --- ตัวกรองย่อยเพิ่มเติม (เบอร์รถ / รอบส่ง) ---
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ ตัวกรองเพิ่มเติมและเงื่อนไขการแสดงผล")
@@ -224,7 +210,7 @@ row_limit = st.sidebar.selectbox(
 
 
 # ==========================================
-# 1. ส่วนแผนที่ (อยู่ด้านบนสุด)
+# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - ใช้ OpenStreetMap ปกติ)
 # ==========================================
 st.subheader(
     f"🗺️ แผนที่แสดงพิกัด (คลัง: {selected_warehouse}, ทั้งหมด {len(df):,} จุด)"
@@ -236,14 +222,9 @@ if not df.empty:
 else:
   center_lat, center_lon = 13.7563, 100.5018
 
-# กำหนด Tile Provider ตามตัวเลือกสไตล์แผนที่
-if "สีจาง" in map_theme:
-  tile_name = "cartodbpositron"
-else:
-  tile_name = "openstreetmap"
-
+# ใช้แผนที่มาตรฐาน OpenStreetMap 100%
 m = folium.Map(
-    location=[center_lat, center_lon], zoom_start=11, tiles=tile_name
+    location=[center_lat, center_lon], zoom_start=11, tiles="OpenStreetMap"
 )
 
 
