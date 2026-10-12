@@ -6,7 +6,9 @@ from streamlit_folium import st_folium
 
 # ตั้งค่าหน้าเว็บ Streamlit (Layout กว้างเต็มจอ)
 st.set_page_config(
-    page_title="ระบบแผนที่จัดส่งสินค้า (Stable)", page_icon="🗺️", layout="wide"
+    page_title="ระบบแผนที่จัดส่งสินค้า (High Performance)",
+    page_icon="🗺️",
+    layout="wide",
 )
 
 # ตกแต่ง UI ด้วย CSS
@@ -39,7 +41,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (เวอร์ชันเสถียร 100%)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (เวอร์ชันเสถียรพิเศษ)</div>',
     unsafe_allow_html=True,
 )
 
@@ -123,7 +125,7 @@ def process_coordinates(data_frame):
       parts = str(val).split(",")
       lat_val = float(parts[0].strip())
       lon_val = float(parts[1].strip())
-      # ช่วงพิกัดประเทศไทย (ครอบคลุมเพื่อนบ้านใกล้เคียงด้วยเพื่อกันข้อมูลตกหล่น)
+      # ช่วงพิกัดประเทศไทยและใกล้เคียง
       if 5.0 <= lat_val <= 25.0 and 95.0 <= lon_val <= 107.0:
         lats.append(lat_val)
         lons.append(lon_val)
@@ -221,7 +223,7 @@ row_limit = st.sidebar.selectbox(
 
 
 # ==========================================
-# 1. ส่วนแผนที่ (อยู่ด้านบนสุด)
+# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - ใช้ FeatureGroup เสริมความเสถียร)
 # ==========================================
 st.subheader(
     f"🗺️ แผนที่แสดงพิกัด (คลัง: {selected_warehouse}, ทั้งหมด {len(df):,} จุด)"
@@ -241,13 +243,12 @@ else:
   tile_url = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
   attr_text = "&copy; OpenStreetMap contributors"
 
-# สร้าง Map object
+# สร้าง Map object พื้นฐาน
 m = folium.Map(
     location=[center_lat, center_lon],
     zoom_start=11,
     tiles=tile_url,
     attr=attr_text,
-    control_scale=True,
 )
 
 
@@ -316,7 +317,10 @@ unique_cats = (
 )
 color_map = get_color_mapping(unique_cats, p_type)
 
-# วาดหมุดลงบนแผนทีทีละจุดอย่างปลอดภัย
+# ใช้ FeatureGroup เพื่อรวมกลุ่มหมุด ช่วยให้แผนที่เรนเดอร์ได้เสถียรและเร็วขึ้น
+marker_cluster = folium.FeatureGroup(name="Markers").add_to(m)
+
+# วาดหมุดลงบน FeatureGroup ทีละจุดอย่างปลอดภัย
 for idx, row in df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
 
@@ -360,9 +364,9 @@ for idx, row in df.iterrows():
       fill_color=pin_color,
       fill_opacity=opacity,
       tooltip=folium.Tooltip(tooltip_html, className="custom-tooltip"),
-  ).add_to(m)
+  ).add_to(marker_cluster)
 
-# แสดงแผนที่อย่างมั่นคง (returned_objects=[] ป้องกันการรีเฟรชซ้ำ)
+# แสดงแผนที่อย่างมั่นคง (returned_objects=[] ป้องกันการรีเฟรชซ้ำเมื่อซูม)
 st_data = st_folium(m, width="100%", height=500, returned_objects=[])
 
 
