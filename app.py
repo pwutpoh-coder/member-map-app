@@ -6,7 +6,7 @@ from streamlit_folium import st_folium
 
 # ตั้งค่าหน้าเว็บ Streamlit (Layout กว้างเต็มจอ)
 st.set_page_config(
-    page_title="ระบบแผนที่และสรุปข้อมูลการจัดส่งสินค้า",
+    page_title="ระบบแผนที่และตารางสรุปข้อมูลการจัดส่งสินค้า",
     page_icon="🗺️",
     layout="wide",
 )
@@ -41,7 +41,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และตารางสรุปข้อมูลการจัดส่งสินค้า</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่ ตารางสรุป และตัวกรองข้อมูลสมาชิก</div>',
     unsafe_allow_html=True,
 )
 
@@ -77,7 +77,7 @@ selected_warehouse = st.sidebar.selectbox(
 )
 
 
-# 2. ฟังก์ชันโหลดข้อมูลเฉพาะคลังที่เลือก (ดึงคอลัมน์ที่จำเป็นรวมถึงยอดส่งเพื่อนำมาคำนวณสรุป)
+# 2. ฟังก์ชันโหลดข้อมูลเฉพาะคลังที่เลือก
 @st.cache_data(ttl=600, show_spinner=False)
 def load_data_by_warehouse(warehouse_name):
   if not warehouse_name:
@@ -142,7 +142,7 @@ def process_coordinates(data_frame):
 
 df = process_coordinates(df)
 
-# แปลงคอลัมน์ยอดส่งให้เป็นตัวเลข เพื่อให้นำไปคำนวณผลรวมในตารางสรุปได้ถูกต้อง
+# แปลงคอลัมน์ยอดส่งให้เป็นตัวเลขเพื่อใช้คำนวณสรุป
 if "ยอดส่ง/เดือน ( ก.ย.69)" in df.columns:
   df["ยอดส่ง_numeric"] = (
       df["ยอดส่ง/เดือน ( ก.ย.69)"]
@@ -201,17 +201,6 @@ filter_display_mode = st.sidebar.radio(
     key="filter_mode_key",
 )
 
-# แยกตารางสำหรับข้อมูลที่จะนำไปแสดงในตารางรายละเอียดด้านล่าง
-table_filtered_df = df.copy()
-if sel_truck != "ทั้งหมด":
-  table_filtered_df = table_filtered_df[
-      table_filtered_df["เบอร์รถ"] == sel_truck
-  ]
-if sel_round != "ทั้งหมด":
-  table_filtered_df = table_filtered_df[
-      table_filtered_df["รอบส่งประจำสัปดาห์"] == sel_round
-  ]
-
 # --- ตั้งค่าจำนวนแถวแสดงผลตารางด้านล่าง ---
 st.sidebar.markdown("---")
 row_limit = st.sidebar.selectbox(
@@ -223,10 +212,14 @@ row_limit = st.sidebar.selectbox(
 
 
 # ==========================================
-# 1. ส่วนแผนที่ (อยู่ด้านบนสุด)
+# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - รองรับการคลิกหมุด)
 # ==========================================
 st.subheader(
     f"🗺️ แผนที่แสดงพิกัด (คลัง: {selected_warehouse}, ทั้งหมด {len(df):,} จุด)"
+)
+st.info(
+    "💡 คำแนะนำ: คุณสามารถใช้เมาส์ **คลิกที่จุดหมุดบนแผนที่**"
+    " เพื่อกรองดูข้อมูลเฉพาะสมาชิกคนนั้นในตารางรายละเอียดด้านล่างได้ทันที"
 )
 
 if not df.empty:
@@ -302,7 +295,7 @@ unique_cats = (
 )
 color_map = get_color_mapping(unique_cats, page)
 
-# วาดหมุดลงบนแผนที่
+# วาดหมุดลงบนแผนที่โดยกำหนด key เป็น lat, lon และรหัสสมาชิกเพื่อให้รับค่าคลิกได้แม่นยำ
 for idx, row in df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
 
@@ -337,6 +330,7 @@ for idx, row in df.iterrows():
     <b>รอบส่ง:</b> {row.get('รอบส่งประจำสัปดาห์', '-')}
     """
 
+  # ใช้รหัสสมาชิกและพิกัดระบุตัวตนในแผนที่
   folium.CircleMarker(
       location=[lat, lon],
       radius=3,
@@ -346,10 +340,13 @@ for idx, row in df.iterrows():
       fill_color=pin_color,
       fill_opacity=opacity,
       tooltip=folium.Tooltip(tooltip_html, className="custom-tooltip"),
+      popup=str(row.get("รหัสสมาชิก", "")),
   ).add_to(m)
 
-# แสดงแผนที่
-st_data = st_folium(m, width="100%", height=500, returned_objects=[])
+# เรนเดอร์แผนที่และรับค่าการคลิกหมุด
+map_output = st_folium(
+    m, width="100%", height=500, returned_objects=["last_clicked", "last_object_clicked"]
+)
 
 
 # ==========================================
@@ -415,10 +412,37 @@ else:
 # ==========================================
 st.markdown("---")
 st.subheader("📋 รายละเอียดข้อมูลสมาชิก (แสดงด้านล่าง)")
-st.info(
-    "💡 แสดงข้อมูลตามตัวกรองที่เลือก สามารถเลือกดูแบบ 50, 100, 500"
-    " หรือทั้งหมดได้"
-)
+
+# กรองข้อมูลตารางตาม Sidebar ก่อน
+table_filtered_df = df.copy()
+if sel_truck != "ทั้งหมด":
+  table_filtered_df = table_filtered_df[
+      table_filtered_df["เบอร์รถ"] == sel_truck
+  ]
+if sel_round != "ทั้งหมด":
+  table_filtered_df = table_filtered_df[
+      table_filtered_df["รอบส่งประจำสัปดาห์"] == sel_round
+  ]
+
+# ตรวจสอบว่าผู้ใช้คลิกเลือกหมุดบนแผนที่หรือไม่
+clicked_member_id = None
+if map_output and map_output.get("last_object_clicked"):
+  clicked_member_id = map_output["last_object_clicked"].get("popup")
+
+if clicked_member_id:
+  st.success(
+      f"🎯 กำลังแสดงข้อมูลเฉพาะสมาชิกที่คลิกเลือกจากแผนที่: รหัส {clicked_member_id}"
+  )
+  if st.button("🔄 ล้างการเลือก (แสดงทั้งหมดตามตัวกรอง Sidebar)"):
+    st.rerun()
+  table_filtered_df = table_filtered_df[
+      table_filtered_df["รหัสสมาชิก"] == str(clicked_member_id)
+  ]
+else:
+  st.info(
+      "💡 แสดงข้อมูลตามตัวกรองใน Sidebar สามารถเลือกดูแบบ 50, 100, 500"
+      " หรือทั้งหมดได้"
+  )
 
 display_cols = [
     c
