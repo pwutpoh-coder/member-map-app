@@ -11,7 +11,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# ตกแต่ง UI ด้วย CSS กำหนดโทนสีปุ่มและธีมเป็น "เทาน้ำเงิน" (Slate / Navy)
+# ตกแต่ง UI ด้วย CSS: กำหนดความกว้าง Tooltip เป็น 5 ซม. (~190px) และขึ้นบรรทัดใหม่อัตโนมัติ
 st.markdown(
     """
     <style>
@@ -21,9 +21,19 @@ st.markdown(
             color: #1e293b;
             margin-bottom: 5px;
         }
-        .stMultiSelect [data-baseweb="tag"] {
-            background-color: #334155 !important;
-            color: white !important;
+        /* กำหนดขนาดกล่อง Tooltip เมื่อเอาเมาส์ชี้ กว้างประมาณ 5 ซม. (190px) ตัดคำและขึ้นบรรทัดใหม่ */
+        .leaflet-tooltip.custom-tooltip {
+            background-color: #ffffff !important;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 6px !important;
+            padding: 8px !important;
+            font-size: 12px !important;
+            font-family: sans-serif !important;
+            color: #1e293b !important;
+            width: 190px !important;
+            white-space: normal !important;
+            word-wrap: break-word !important;
+            box-shadow: 0px 2px 6px rgba(0,0,0,0.15);
         }
     </style>
 """,
@@ -31,7 +41,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (โหมดความเร็วสูงสุด ไม่ค้าง)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (โหมดความเร็วสูงพิเศษ)</div>',
     unsafe_allow_html=True,
 )
 
@@ -40,14 +50,12 @@ SHEET_ID = "1Ze82Uc0r179gcGvfCyE4KsrK5n8wFTAzZmLh1If1-9A"
 SHEET_NAME = "ข้อมูล"
 
 
-# 1. โหลดเฉพาะรายชื่อคลังทั้งหมดก่อน (โหลดเร็วมากเพราะอ่านแค่คอลัมน์คลัง)
+# 1. โหลดเฉพาะรายชื่อคลังทั้งหมดก่อนเพื่อมาสร้างตัวเลือก (รวดเร็วมาก)
 @st.cache_data(ttl=600, show_spinner=False)
 def load_warehouse_list():
   encoded_sheet_name = quote(SHEET_NAME)
-  # ดึงเฉพาะคอลัมน์คลัง (คอลัมน์ E) เพื่อมาสร้างเมนูตัวเลือก
   url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded_sheet_name}&tq=select%20E"
   df = pd.read_csv(url, encoding="utf-8", dtype=str)
-  # คืนค่ารายการคลังที่ไม่ซ้ำกัน
   if not df.empty and "คลัง" in df.columns:
     return sorted(df["คลัง"].dropna().unique().tolist())
   return []
@@ -58,32 +66,30 @@ try:
 except Exception as e:
   all_warehouses = []
 
-# --- Sidebar: ตัวกรองหลักเลือกคลังสินค้า ---
-st.sidebar.header("🔍 ตัวกรองหลัก (เพื่อความเร็วสูงสุด)")
+# --- Sidebar: ตัวกรองหลักเลือกคลังสินค้า (ให้เลือกทีละ 1 สาขาเพื่อความเร็วสูงสุด) ---
+st.sidebar.header("🔍 ตัวกรองหลัก (เลือกทีละสาขา)")
 
 if all_warehouses:
-  default_wh = [all_warehouses[0]]
+  default_wh = all_warehouses[0]
 else:
-  default_wh = []
+  default_wh = None
 
-selected_warehouses = st.sidebar.multiselect(
-    "1. เลือกคลังสินค้า (เลือกได้หลายคลัง):",
+selected_warehouse = st.sidebar.selectbox(
+    "1. เลือกคลังสินค้าที่ต้องการแสดง:",
     all_warehouses,
-    default=default_wh,
-    key="warehouse_filter_key",
+    index=0 if all_warehouses else 0,
+    key="warehouse_select_key",
 )
 
 
-# 2. ฟังก์ชันโหลดข้อมูลเฉพาะคลังที่ถูกเลือก (Query เฉพาะข้อมูลที่จำเป็น ไม่โหลดทั้งหมด 1.4 แสนแถว)
+# 2. ฟังก์ชันโหลดข้อมูลเฉพาะคลังที่ถูกเลือก (Query ตรงจาก Google Sheets ไม่โหลดทั้งหมด)
 @st.cache_data(ttl=600, show_spinner=False)
-def load_data_by_warehouses(warehouses_tuple):
-  if not warehouses_tuple:
+def load_data_by_warehouse(warehouse_name):
+  if not warehouse_name:
     return pd.DataFrame()
 
   encoded_sheet_name = quote(SHEET_NAME)
-  # สร้างเงื่อนไข SQL สำหรับ Google Visualization API เพื่อดึงเฉพาะคลังที่ผู้ใช้เลือก
-  wh_conditions = " or ".join([f"E = '{wh}'" for wh in warehouses_tuple])
-  query = f"select * where {wh_conditions}"
+  query = f"select * where E = '{warehouse_name}'"
   encoded_query = quote(query)
 
   url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded_sheet_name}&tq={encoded_query}"
@@ -92,17 +98,16 @@ def load_data_by_warehouses(warehouses_tuple):
   return df
 
 
-if not selected_warehouses:
+if not selected_warehouse:
   st.warning(
-      "⚠️ กรุณาเลือกคลังสินค้าอย่างน้อย 1 คลังในแถบด้านข้าง (Sidebar)"
-      " เพื่อเริ่มแสดงข้อมูล"
+      "⚠️ กรุณาเลือกคลังสินค้าในแถบด้านข้าง (Sidebar) เพื่อเริ่มแสดงข้อมูล"
   )
   st.stop()
 
-# โหลดข้อมูลเฉพาะคลังที่เลือก (ทำให้โหลดเสร็จภายใน 1-2 วินาที ไม่ค้าง)
+# โหลดข้อมูลเฉพาะคลังที่เลือก (เสร็จภายใน 1 วินาที)
 try:
-  with st.spinner("กำลังดึงข้อมูลเฉพาะคลังที่เลือกอย่างรวดเร็ว..."):
-    df = load_data_by_warehouses(tuple(selected_warehouses))
+  with st.spinner(f"กำลังดึงข้อมูลคลัง {selected_warehouse}..."):
+    df = load_data_by_warehouse(selected_warehouse)
 except Exception as e:
   st.error(f"❌ ไม่สามารถโหลดข้อมูลจาก Google Sheets ได้: {e}")
   st.stop()
@@ -131,7 +136,7 @@ def process_coordinates(data_frame):
 
 df = process_coordinates(df)
 
-# ตัวกรองย่อยเพิ่มเติม (เบอร์รถ / รอบส่ง) จากข้อมูลคลังที่ดึงมาแล้ว
+# ตัวกรองย่อยเพิ่มเติม (เบอร์รถ / รอบส่ง)
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ ตัวกรองเพิ่มเติม")
 
@@ -153,7 +158,7 @@ sel_round = st.sidebar.selectbox(
     "เลือกรอบส่งประจำสัปดาห์", rounds, index=0, key="round_filter_key"
 )
 
-# กรองข้อมูลซ้ำตามตัวกรองย่อย
+# กรองข้อมูลตามตัวกรองย่อย
 filtered_df = df.copy()
 if sel_truck != "ทั้งหมด":
   filtered_df = filtered_df[filtered_df["เบอร์รถ"] == sel_truck]
@@ -183,16 +188,16 @@ row_limit = st.sidebar.selectbox(
 
 
 # ==========================================
-# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - โหลดไว ไม่มีสะดุด)
+# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - โหลดเร็ว ไม่รีเฟรชเมื่อซูม)
 # ==========================================
 total_points = len(filtered_df)
 st.subheader(
-    f"🗺️ แผนที่แสดงพิกัด (รวม {total_points:,} จุด จากคลังที่เลือก)"
+    f"🗺️ แผนที่แสดงพิกัด (รวม {total_points:,} จุด ของคลัง {selected_warehouse})"
 )
 
 map_df = filtered_df.reset_index(drop=True)
 
-# จำกัดจุดสูงสุดไม่เกิน 20,000 จุดเพื่อความปลอดภัยของเบราว์เซอร์
+# จำกัดจุดสูงสุดไม่เกิน 20,000 จุด
 MAX_POINTS = 20000
 if total_points > MAX_POINTS:
   st.warning(
@@ -210,24 +215,26 @@ else:
 # สร้างแผนที่ด้วย OpenStreetMap (ฟรี 100% ไม่ใช้ API Key)
 m = folium.Map(
     location=[center_lat, center_lon],
-    zoom_start=10,
+    zoom_start=11,
     tiles="OpenStreetMap",
 )
 
 
-# ฟังก์ชันกำหนดสีตามหมวดหมู่ (โทนสีเทาน้ำเงิน)
+# ฟังก์ชันกำหนดสี (เน้นสีสันสดใส ไม่เอาสีเทาหรือดำ)
 def get_color_mapping(categories):
   colors = [
-      "#334155",
-      "#1e40af",
-      "#0369a1",
-      "#0f766e",
-      "#374151",
-      "#475569",
-      "#1d4ed8",
-      "#0284c7",
+      "#2563eb",
+      "#dc2626",
+      "#16a34a",
+      "#9333ea",
+      "#ea580c",
+      "#0891b2",
+      "#4f46e5",
+      "#ca8a04",
       "#0d9488",
-      "#4b5563",
+      "#be185d",
+      "#22c55e",
+      "#eab308",
   ]
   return {
       str(cat): colors[i % len(colors)] for i, cat in enumerate(categories)
@@ -256,40 +263,30 @@ color_map = get_color_mapping(unique_cats)
 for idx, row in map_df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
   cat_val = str(row.get(color_col, "default"))
-  pin_color = color_map.get(cat_val, "#334155")
+  pin_color = color_map.get(cat_val, "#2563eb")
 
-  # ข้อความเมื่อเอาเมาส์ชี้ (Tooltip)
-  tooltip_text = (
-      f"รหัส: {row.get('รหัสสมาชิก', '-')}, ชื่อ: {row.get('ชื่อ-นามสกุล', '-')},"
-      f" คลัง: {row.get('คลัง', '-')}, รถ: {row.get('เบอร์รถ', '-')}"
-  )
-
-  # ข้อมูลแบบละเอียดเมื่อคลิก (Popup)
-  popup_html = f"""
-    <div style="width: 200px; font-size: 12px; font-family: sans-serif; background-color: #ffffff; padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1;">
-        <b>รหัสสมาชิก:</b> {row.get('รหัสสมาชิก', '-')}<br>
-        <b>ชื่อ-นามสกุล:</b> {row.get('ชื่อ-นามสกุล', '-')}<br>
-        <b>ที่อยู่:</b> {row.get('ที่อยู่จัดส่ง บ้านเลขที่/อาคาร', '-')}<br>
-        <b>คลัง:</b> {row.get('คลัง', '-')}<br>
-        <b>เบอร์รถ:</b> {row.get('เบอร์รถ', '-')}<br>
-        <b>รอบส่ง:</b> {row.get('รอบส่งประจำสัปดาห์', '-')}<br>
-        <b>ยอดส่ง:</b> {row.get('ยอดส่ง/เดือน ( ก.ย.69)', '-')}
-    </div>
+  # ข้อความเมื่อเอาเมาส์ชี้ (Tooltip กว้าง 5 ซม. / 190px และขึ้นบรรทัดใหม่ได้)
+  tooltip_html = f"""
+    <b>รหัส:</b> {row.get('รหัสสมาชิก', '-')}<br>
+    <b>ชื่อ:</b> {row.get('ชื่อ-นามสกุล', '-')}<br>
+    <b>ที่อยู่:</b> {row.get('ที่อยู่จัดส่ง บ้านเลขที่/อาคาร', '-')}<br>
+    <b>คลัง:</b> {row.get('คลัง', '-')}<br>
+    <b>รถ:</b> {row.get('เบอร์รถ', '-')}<br>
+    <b>รอบส่ง:</b> {row.get('รอบส่งประจำสัปดาห์', '-')}
     """
 
   folium.CircleMarker(
       location=[lat, lon],
-      radius=4,
+      radius=5,
       color=pin_color,
       fill=True,
       fill_color=pin_color,
-      fill_opacity=0.8,
-      popup=folium.Popup(popup_html, max_width=300),
-      tooltip=tooltip_text,
+      fill_opacity=0.9,
+      tooltip=folium.Tooltip(tooltip_html, className="custom-tooltip"),
   ).add_to(m)
 
-# แสดงแผนที่ด้านบน
-st_data = st_folium(m, width="100%", height=500)
+# แสดงแผนที่ด้วย st_folium โดยกำหนดให้ return_on_fit_bounds=False เพื่อป้องกันการรีเฟรชซ้ำเมื่อซูมแผนที่
+st_data = st_folium(m, width="100%", height=500, returned_objects=[])
 
 
 # ==========================================
@@ -324,4 +321,4 @@ if not filtered_df.empty:
 
   st.dataframe(table_display, use_container_width=True)
 else:
-  st.warning("⚠️ กรุณาเลือกคลังสินค้าในแถบด้านข้าง (Sidebar) เพื่อแสดงข้อมูล")
+  st.warning("⚠️ ไม่พบข้อมูลตามเงื่อนไขที่เลือก")
