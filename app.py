@@ -11,7 +11,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# ตกแต่ง UI ด้วย CSS
+# ตกแต่ง UI ด้วย CSS (รวมถึงปรับแต่งกล่อง multiselect ให้เป็นโทนสีน้ำเงิน)
 st.markdown(
     """
     <style>
@@ -35,13 +35,22 @@ st.markdown(
             word-wrap: break-word !important;
             box-shadow: 0px 2px 6px rgba(0,0,0,0.15);
         }
+        /* ปรับแต่งสีป้าย Tag ของ st.multiselect ที่เลือกแล้วให้เป็นโทนสีน้ำเงิน */
+        .stMultiSelect [data-baseweb="tag"] {
+            background-color: #dbeafe !important;
+            color: #1e40af !important;
+            border-color: #bfdbfe !important;
+        }
+        .stMultiSelect [data-baseweb="tag"] span {
+            color: #1e40af !important;
+        }
     </style>
 """,
     unsafe_allow_html=True,
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่ ตารางสรุป และตัวกรองข้อมูลสมาชิก (เลือกได้หลายตัวกรอง)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่ ตารางสรุป และตัวกรองข้อมูลสมาชิก</div>',
     unsafe_allow_html=True,
 )
 
@@ -167,7 +176,7 @@ page = st.sidebar.radio(
     key="page_selector_key",
 )
 
-# --- ตัวกรองย่อยเพิ่มเติม (เปลี่ยนเป็น multiselect เลือกได้มากกว่า 1 ตัว) ---
+# --- ตัวกรองย่อยเพิ่มเติม (Multiselect เลือกได้หลายรายการ - โทนสีน้ำเงิน) ---
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ ตัวกรองเพิ่มเติม (เลือกได้หลายรายการ)")
 
@@ -218,7 +227,7 @@ row_limit = st.sidebar.selectbox(
 
 
 # ==========================================
-# สร้างชุดข้อมูลที่ผ่านการกรองจาก Sidebar (ใช้ร่วมกันทั้งแผนที่, ตารางสรุป และตารางรายละเอียด)
+# สร้างชุดข้อมูลที่ผ่านการกรองจาก Sidebar
 # ==========================================
 filtered_df = df.copy()
 if sel_trucks:
