@@ -6,12 +6,12 @@ from streamlit_folium import st_folium
 
 # ตั้งค่าหน้าเว็บ Streamlit (Layout กว้างเต็มจอ)
 st.set_page_config(
-    page_title="ระบบแผนที่จัดส่งสินค้า (Ultra Fast)",
+    page_title="ระบบแผนที่จัดส่งสินค้า (Super Fast)",
     page_icon="🗺️",
     layout="wide",
 )
 
-# ตกแต่ง UI ด้วย CSS: กำหนดความกว้าง Tooltip เป็น 5 ซม. (~190px) และขึ้นบรรทัดใหม่อัตโนมัติ
+# ตกแต่ง UI ด้วย CSS
 st.markdown(
     """
     <style>
@@ -41,7 +41,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (โหมดความเร็วสูงพิเศษ)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (โหมดความเร็วสูงพิเศษไม่เกิน 15 วินาที)</div>',
     unsafe_allow_html=True,
 )
 
@@ -66,13 +66,8 @@ try:
 except Exception as e:
   all_warehouses = []
 
-# --- Sidebar: ตัวกรองหลักเลือกคลังสินค้า (ให้เลือกทีละ 1 สาขาเพื่อความเร็วสูงสุด) ---
+# --- Sidebar: ตัวกรองหลักเลือกคลังสินค้า ---
 st.sidebar.header("🔍 ตัวกรองหลัก (เลือกทีละสาขา)")
-
-if all_warehouses:
-  default_wh = all_warehouses[0]
-else:
-  default_wh = None
 
 selected_warehouse = st.sidebar.selectbox(
     "1. เลือกคลังสินค้าที่ต้องการแสดง:",
@@ -82,14 +77,15 @@ selected_warehouse = st.sidebar.selectbox(
 )
 
 
-# 2. ฟังก์ชันโหลดข้อมูลเฉพาะคลังที่ถูกเลือก (Query ตรงจาก Google Sheets ไม่โหลดทั้งหมด)
+# 2. ฟังก์ชันโหลดข้อมูลเฉพาะคลังที่เลือก (จำกัดการดึงข้อมูลเฉพาะแถวของคลังนั้นๆ เพื่อความเร็วระดับวินาที)
 @st.cache_data(ttl=600, show_spinner=False)
 def load_data_by_warehouse(warehouse_name):
   if not warehouse_name:
     return pd.DataFrame()
 
   encoded_sheet_name = quote(SHEET_NAME)
-  query = f"select * where E = '{warehouse_name}'"
+  # ดึงเฉพาะข้อมูลที่ตรงกับคลังที่เลือกเพื่อลดขนาดข้อมูลที่ส่งผ่านเครือข่าย
+  query = f"select A, B, C, D, E, F, G, J where E = '{warehouse_name}'"
   encoded_query = quote(query)
 
   url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded_sheet_name}&tq={encoded_query}"
@@ -104,7 +100,7 @@ if not selected_warehouse:
   )
   st.stop()
 
-# โหลดข้อมูลเฉพาะคลังที่เลือก (เสร็จภายใน 1 วินาที)
+# โหลดข้อมูลเฉพาะคลังที่เลือก (เสร็จภายในไม่กี่วินาที)
 try:
   with st.spinner(f"กำลังดึงข้อมูลคลัง {selected_warehouse}..."):
     df = load_data_by_warehouse(selected_warehouse)
@@ -121,7 +117,7 @@ df = df.dropna(subset=["พิกัด GPS"])
 df = df[df["พิกัด GPS"].str.contains(",", na=False)]
 
 
-# ฟังก์ชันแปลงพิกัดแบบรวดเร็ว (Vectorized Parsing)
+# ฟังก์ชันแปลงพิกัดแบบรวดเร็ว
 @st.cache_data(show_spinner=False)
 def process_coordinates(data_frame):
   split_coords = data_frame["พิกัด GPS"].str.split(",", expand=True)
@@ -188,7 +184,7 @@ row_limit = st.sidebar.selectbox(
 
 
 # ==========================================
-# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - โหลดเร็ว ไม่รีเฟรชเมื่อซูม)
+# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - โหลดไว ไม่รีเฟรชเมื่อซูม)
 # ==========================================
 total_points = len(filtered_df)
 st.subheader(
@@ -197,7 +193,7 @@ st.subheader(
 
 map_df = filtered_df.reset_index(drop=True)
 
-# จำกัดจุดสูงสุดไม่เกิน 20,000 จุด
+# จำกัดจุดสูงสุดไม่เกิน 20,000 จุด เพื่อความปลอดภัยของเบราว์เซอร์
 MAX_POINTS = 20000
 if total_points > MAX_POINTS:
   st.warning(
@@ -220,7 +216,7 @@ m = folium.Map(
 )
 
 
-# ฟังก์ชันกำหนดสี (เน้นสีสันสดใส ไม่เอาสีเทาหรือดำ)
+# ฟังก์ชันกำหนดสี (เน้นสีสันสดใส ไร้สีเทา/ดำ)
 def get_color_mapping(categories):
   colors = [
       "#2563eb",
@@ -285,7 +281,7 @@ for idx, row in map_df.iterrows():
       tooltip=folium.Tooltip(tooltip_html, className="custom-tooltip"),
   ).add_to(m)
 
-# แสดงแผนที่ด้วย st_folium โดยกำหนดให้ return_on_fit_bounds=False เพื่อป้องกันการรีเฟรชซ้ำเมื่อซูมแผนที่
+# แสดงแผนที่ด้วย st_folium โดยกำหนด returned_objects=[] เพื่อป้องกันการรีเฟรชซ้ำเมื่อซูม
 st_data = st_folium(m, width="100%", height=500, returned_objects=[])
 
 
