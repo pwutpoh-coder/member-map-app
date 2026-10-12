@@ -6,7 +6,7 @@ from streamlit_folium import st_folium
 
 # ตั้งค่าหน้าเว็บ Streamlit (Layout กว้างเต็มจอ)
 st.set_page_config(
-    page_title="ระบบแผนที่จัดส่งสินค้า (High Performance)",
+    page_title="ระบบแผนที่และสรุปข้อมูลการจัดส่งสินค้า",
     page_icon="🗺️",
     layout="wide",
 )
@@ -41,7 +41,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (แผนที่ปกติ OpenStreetMap)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และตารางสรุปข้อมูลการจัดส่งสินค้า</div>',
     unsafe_allow_html=True,
 )
 
@@ -77,7 +77,7 @@ selected_warehouse = st.sidebar.selectbox(
 )
 
 
-# 2. ฟังก์ชันโหลดข้อมูลเฉพาะคลังที่เลือก
+# 2. ฟังก์ชันโหลดข้อมูลเฉพาะคลังที่เลือก (ดึงคอลัมน์ที่จำเป็นรวมถึงยอดส่งเพื่อนำมาคำนวณสรุป)
 @st.cache_data(ttl=600, show_spinner=False)
 def load_data_by_warehouse(warehouse_name):
   if not warehouse_name:
@@ -142,6 +142,19 @@ def process_coordinates(data_frame):
 
 df = process_coordinates(df)
 
+# แปลงคอลัมน์ยอดส่งให้เป็นตัวเลข เพื่อให้นำไปคำนวณผลรวมในตารางสรุปได้ถูกต้อง
+if "ยอดส่ง/เดือน ( ก.ย.69)" in df.columns:
+  df["ยอดส่ง_numeric"] = (
+      df["ยอดส่ง/เดือน ( ก.ย.69)"]
+      .astype(str)
+      .str.replace(",", "")
+      .str.extract(r"([\d\.]+)")[0]
+      .astype(float)
+      .fillna(0)
+  )
+else:
+  df["ยอดส่ง_numeric"] = 0.0
+
 # --- เลือกหน้า (แยกสี 3 หน้า) ---
 st.sidebar.markdown("---")
 page = st.sidebar.radio(
@@ -188,7 +201,7 @@ filter_display_mode = st.sidebar.radio(
     key="filter_mode_key",
 )
 
-# แยกตารางสำหรับข้อมูลที่จะนำไปแสดงในตารางด้านล่าง
+# แยกตารางสำหรับข้อมูลที่จะนำไปแสดงในตารางรายละเอียดด้านล่าง
 table_filtered_df = df.copy()
 if sel_truck != "ทั้งหมด":
   table_filtered_df = table_filtered_df[
@@ -210,7 +223,7 @@ row_limit = st.sidebar.selectbox(
 
 
 # ==========================================
-# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - ใช้ OpenStreetMap ปกติ)
+# 1. ส่วนแผนที่ (อยู่ด้านบนสุด)
 # ==========================================
 st.subheader(
     f"🗺️ แผนที่แสดงพิกัด (คลัง: {selected_warehouse}, ทั้งหมด {len(df):,} จุด)"
@@ -222,7 +235,6 @@ if not df.empty:
 else:
   center_lat, center_lon = 13.7563, 100.5018
 
-# ใช้แผนที่มาตรฐาน OpenStreetMap 100%
 m = folium.Map(
     location=[center_lat, center_lon], zoom_start=11, tiles="OpenStreetMap"
 )
@@ -231,7 +243,6 @@ m = folium.Map(
 # ฟังก์ชันกำหนดสีตามหน้า
 def get_color_mapping(categories, page_type):
   if "หน้า 3" in page_type:
-    # กำหนดสีมาตรฐานตามวันในสัปดาห์
     day_colors = {
         "จันทร์": "#ca8a04",  # สีเหลือง
         "อังคาร": "#be185d",  # สีชมพู
@@ -256,7 +267,6 @@ def get_color_mapping(categories, page_type):
         mapping[cat_str] = fallback_colors[i % len(fallback_colors)]
     return mapping
   else:
-    # หน้า 1 (คลัง) และ หน้า 2 (เบอร์รถ) ใช้ชุดสีสดใสกระจายตัว
     colors = [
         "#2563eb",
         "#dc2626",
@@ -276,7 +286,6 @@ def get_color_mapping(categories, page_type):
     }
 
 
-# กำหนดคอลัมน์ที่จะนำมาแยกสีตามหน้าที่เลือกใน Sidebar
 if "หน้า 1" in page:
   color_col = "คลัง"
 elif "หน้า 2" in page:
@@ -293,7 +302,7 @@ unique_cats = (
 )
 color_map = get_color_mapping(unique_cats, page)
 
-# วาดหมุดลงบนแผนที่ทีละจุดอย่างปลอดภัย
+# วาดหมุดลงบนแผนที่
 for idx, row in df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
 
@@ -339,15 +348,73 @@ for idx, row in df.iterrows():
       tooltip=folium.Tooltip(tooltip_html, className="custom-tooltip"),
   ).add_to(m)
 
-# แสดงแผนที่อย่างมั่นคง (returned_objects=[] ป้องกันการรีเฟรชซ้ำเมื่อซูม)
+# แสดงแผนที่
 st_data = st_folium(m, width="100%", height=500, returned_objects=[])
 
 
 # ==========================================
-# 2. ส่วนตารางข้อมูล (อยู่ด้านล่าง)
+# 2. ส่วนตารางสรุปข้อมูล (Summary Table ตามแต่ละหน้า)
 # ==========================================
 st.markdown("---")
-st.subheader("📋 รายละเอียดข้อมูล (แสดงด้านล่าง)")
+if "หน้า 1" in page:
+  st.subheader("📊 ตารางสรุปภาพรวมตาม 'คลัง'")
+  if not df.empty and "คลัง" in df.columns:
+    summary_df = (
+        df.groupby("คลัง")
+        .agg(
+            จำนวนเบอร์รถ=("เบอร์รถ", "nunique"),
+            จำนวนสมาชิก=("รหัสสมาชิก", "count"),
+            ยอดส่งรวม=("ยอดส่ง_numeric", "sum"),
+        )
+        .reset_index()
+    )
+    summary_df["ยอดส่งรวม"] = summary_df["ยอดส่งรวม"].apply(lambda x: f"{x:,.2f}")
+    st.dataframe(summary_df, use_container_width=True)
+
+elif "หน้า 2" in page:
+  st.subheader("📊 ตารางสรุปข้อมูลแยกตาม 'คลัง และ เบอร์รถ'")
+  if not df.empty and "เบอร์รถ" in df.columns:
+    group_cols = (
+        ["คลัง", "เบอร์รถ"]
+        if "คลัง" in df.columns
+        else ["เบอร์รถ"]
+    )
+    summary_df = (
+        df.groupby(group_cols)
+        .agg(
+            จำนวนสมาชิก=("รหัสสมาชิก", "count"),
+            ยอดส่งรวม=("ยอดส่ง_numeric", "sum"),
+        )
+        .reset_index()
+    )
+    summary_df["ยอดส่งรวม"] = summary_df["ยอดส่งรวม"].apply(lambda x: f"{x:,.2f}")
+    st.dataframe(summary_df, use_container_width=True)
+
+else:
+  st.subheader("📊 ตารางสรุปข้อมูลแยกตาม 'รอบส่งประจำสัปดาห์ และ เบอร์รถ'")
+  if not df.empty and "รอบส่งประจำสัปดาห์" in df.columns:
+    group_cols = (
+        ["รอบส่งประจำสัปดาห์", "เบอร์รถ"]
+        if "เบอร์รถ" in df.columns
+        else ["รอบส่งประจำสัปดาห์"]
+    )
+    summary_df = (
+        df.groupby(group_cols)
+        .agg(
+            จำนวนสมาชิก=("รหัสสมาชิก", "count"),
+            ยอดส่งรวม=("ยอดส่ง_numeric", "sum"),
+        )
+        .reset_index()
+    )
+    summary_df["ยอดส่งรวม"] = summary_df["ยอดส่งรวม"].apply(lambda x: f"{x:,.2f}")
+    st.dataframe(summary_df, use_container_width=True)
+
+
+# ==========================================
+# 3. ส่วนตารางรายละเอียดข้อมูล (Detailed Table)
+# ==========================================
+st.markdown("---")
+st.subheader("📋 รายละเอียดข้อมูลสมาชิก (แสดงด้านล่าง)")
 st.info(
     "💡 แสดงข้อมูลตามตัวกรองที่เลือก สามารถเลือกดูแบบ 50, 100, 500"
     " หรือทั้งหมดได้"
