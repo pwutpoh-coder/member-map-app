@@ -41,7 +41,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่ ตารางสรุป และตัวกรองข้อมูลสมาชิก</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่ ตารางสรุป และตัวกรองข้อมูลสมาชิก (เลือกได้หลายตัวกรอง)</div>',
     unsafe_allow_html=True,
 )
 
@@ -167,26 +167,32 @@ page = st.sidebar.radio(
     key="page_selector_key",
 )
 
-# --- ตัวกรองย่อยเพิ่มเติม (เบอร์รถ / รอบส่ง) ---
+# --- ตัวกรองย่อยเพิ่มเติม (เปลี่ยนเป็น multiselect เลือกได้มากกว่า 1 ตัว) ---
 st.sidebar.markdown("---")
-st.sidebar.header("⚙️ ตัวกรองเพิ่มเติมและเงื่อนไขการแสดงผล")
+st.sidebar.header("⚙️ ตัวกรองเพิ่มเติม (เลือกได้หลายรายการ)")
 
-trucks = (
-    ["ทั้งหมด"] + df["เบอร์รถ"].dropna().unique().tolist()
+truck_options = (
+    df["เบอร์รถ"].dropna().unique().tolist()
     if "เบอร์รถ" in df.columns
-    else ["ทั้งหมด"]
+    else []
 )
-sel_truck = st.sidebar.selectbox(
-    "เลือกเบอร์รถ", trucks, index=0, key="truck_filter_key"
+sel_trucks = st.sidebar.multiselect(
+    "เลือกเบอร์รถ (เลือกได้หลายคัน / ไม่เลือก = ทั้งหมด)",
+    truck_options,
+    default=[],
+    key="truck_multiselect_key",
 )
 
-rounds = (
-    ["ทั้งหมด"] + df["รอบส่งประจำสัปดาห์"].dropna().unique().tolist()
+round_options = (
+    df["รอบส่งประจำสัปดาห์"].dropna().unique().tolist()
     if "รอบส่งประจำสัปดาห์" in df.columns
-    else ["ทั้งหมด"]
+    else []
 )
-sel_round = st.sidebar.selectbox(
-    "เลือกรอบส่งประจำสัปดาห์", rounds, index=0, key="round_filter_key"
+sel_rounds = st.sidebar.multiselect(
+    "เลือกรอบส่งประจำสัปดาห์ (เลือกได้หลายรอบ / ไม่เลือก = ทั้งหมด)",
+    round_options,
+    default=[],
+    key="round_multiselect_key",
 )
 
 # ทางเลือกการแสดงผลเมื่อใช้ตัวกรองย่อย
@@ -215,10 +221,10 @@ row_limit = st.sidebar.selectbox(
 # สร้างชุดข้อมูลที่ผ่านการกรองจาก Sidebar (ใช้ร่วมกันทั้งแผนที่, ตารางสรุป และตารางรายละเอียด)
 # ==========================================
 filtered_df = df.copy()
-if sel_truck != "ทั้งหมด":
-  filtered_df = filtered_df[filtered_df["เบอร์รถ"] == sel_truck]
-if sel_round != "ทั้งหมด":
-  filtered_df = filtered_df[filtered_df["รอบส่งประจำสัปดาห์"] == sel_round]
+if sel_trucks:
+  filtered_df = filtered_df[filtered_df["เบอร์รถ"].isin(sel_trucks)]
+if sel_rounds:
+  filtered_df = filtered_df[filtered_df["รอบส่งประจำสัปดาห์"].isin(sel_rounds)]
 
 
 # ==========================================
@@ -305,17 +311,13 @@ unique_cats = (
 )
 color_map = get_color_mapping(unique_cats, page)
 
-# วาดหมุดลงบนแผนที่ (วนลูปจาก df ทั้งหมด แต่แสดงผลตามเงื่อนไข Sidebar)
+# วาดหมุดลงบนแผนที่โดยอ้างอิงจาก Multiselect ใน Sidebar
 for idx, row in df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
 
-  matches_truck = (
-      (sel_truck == "All" or sel_truck == "ทั้งหมด")
-      or (str(row.get("เบอร์รถ", "")) == sel_truck)
-  )
-  matches_round = (
-      (sel_round == "All" or sel_round == "ทั้งหมด")
-      or (str(row.get("รอบส่งประจำสัปดาห์", "")) == sel_round)
+  matches_truck = (not sel_trucks) or (str(row.get("เบอร์รถ", "")) in sel_trucks)
+  matches_round = (not sel_rounds) or (
+      str(row.get("รอบส่งประจำสัปดาห์", "")) in sel_rounds
   )
 
   is_fully_matched = matches_truck and matches_round
