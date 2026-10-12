@@ -41,7 +41,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (แผนที่จริงเสถียร 100%)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (แสดงพิกัดสมบูรณ์)</div>',
     unsafe_allow_html=True,
 )
 
@@ -110,22 +110,36 @@ if "พิกัด GPS" not in df.columns:
   st.error("❌ ไม่พบคอลัมน์ 'พิกัด GPS' ในไฟล์ Google Sheets")
   st.stop()
 
-# กรองแถวที่ไม่มีพิกัดออก
+# กรองแถวที่ไม่มีพิกัดออกอย่างปลอดภัย
 df = df.dropna(subset=["พิกัด GPS"])
 df = df[df["พิกัด GPS"].str.contains(",", na=False)]
 
 
-# ฟังก์ชันแปลงพิกัดแบบรวดเร็ว
+# ฟังก์ชันแปลงพิกัดและกรองค่าที่ผิดพลาดออกทันที
 @st.cache_data(show_spinner=False)
 def process_coordinates(data_frame):
-  split_coords = data_frame["พิกัด GPS"].str.split(",", expand=True)
-  if split_coords.shape[1] >= 2:
-    data_frame["lat"] = pd.to_numeric(split_coords[0], errors="coerce")
-    data_frame["lon"] = pd.to_numeric(split_coords[1], errors="coerce")
-  else:
-    data_frame["lat"] = None
-    data_frame["lon"] = None
-  return data_frame.dropna(subset=["lat", "lon"])
+  lats = []
+  lons = []
+  for val in data_frame["พิกัด GPS"]:
+    try:
+      parts = str(val).split(",")
+      lat_val = float(parts[0].strip())
+      lon_val = float(parts[1].strip())
+      # ตรวจสอบช่วงพิกัดประเทศไทยเบื้องต้นเพื่อป้องกันค่าเพี้ยน
+      if 5.0 <= lat_val <= 21.0 and 97.0 <= lon_val <= 106.0:
+        lats.append(lat_val)
+        lons.append(lon_val)
+      else:
+        lats.append(None)
+        lons.append(None)
+    except:
+      lats.append(None)
+      lons.append(None)
+
+  data_frame["lat"] = lats
+  data_frame["lon"] = lons
+  # ตัดแถวที่แปลงพิกัดไม่สำเร็จออกเด็ดขาด
+  return data_frame.dropna(subset=["lat", "lon"]).reset_index(drop=True)
 
 
 df = process_coordinates(df)
@@ -142,14 +156,12 @@ page = st.sidebar.radio(
     key="page_selector_key",
 )
 
-# --- ตัวเลือกสไตล์แผนที่ (ใช้ URL เสถียร ไม่หลุด) ---
+# --- ตัวเลือกสไตล์แผนที่ ---
 st.sidebar.markdown("---")
 map_theme = st.sidebar.radio(
     "🗺️ เลือกสไตล์แผนที่:",
     [
-        (
-            "แผนที่สีจาง (CartoDB Positron - แนะนำไม่ให้สีแผนที่ทับกับสีพิกัด)"
-        ),
+        "แผนที่สีจาง (CartoDB Positron - แนะนำไม่ให้สีแผนที่ทับกับสีพิกัด)",
         "แผนที่ปกติ (OpenStreetMap)",
     ],
     index=0,
@@ -215,33 +227,20 @@ row_limit = st.sidebar.selectbox(
 # 1. ส่วนแผนที่ (อยู่ด้านบนสุด)
 # ==========================================
 st.subheader(
-    f"🗺️ แผนที่แสดงพิกัด (คลัง: {selected_warehouse})"
+    f"🗺️ แผนที่แสดงพิกัด (คลัง: {selected_warehouse}, ทั้งหมด {len(df):,} จุด)"
 )
 
-map_render_df = df.copy()
-
-if not map_render_df.empty:
-  center_lat = map_render_df["lat"].mean()
-  center_lon = map_render_df["lon"].mean()
+if not df.empty:
+  center_lat = float(df["lat"].mean())
+  center_lon = float(df["lon"].mean())
 else:
   center_lat, center_lon = 13.7563, 100.5018
 
-# กำหนด Tile Provider ผ่าน URL Template โดยตรงเพื่อความเสถียร 100%
-if "สีจาง" in map_theme:
-  tile_url = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-  attr_text = '&copy; <a href="https://carto.com/">CARTO</a>'
-else:
-  tile_url = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-  attr_text = (
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-      " contributors"
-  )
+# กำหนด Tile Provider ตามตัวเลือก
+tile_name = "cartodbpositron" if "สีจาง" in map_theme else "openstreetmap"
 
 m = folium.Map(
-    location=[center_lat, center_lon],
-    zoom_start=11,
-    tiles=tile_url,
-    attr=attr_text,
+    location=[center_lat, center_lon], zoom_start=11, tiles=tile_name
 )
 
 
@@ -299,21 +298,19 @@ elif "หน้า 2" in page:
   p_type = "หน้า 2"
 else:
   color_col = (
-      "รอบส่งประจำสัปดาห์"
-      if "รอบส่งประจำสัปดาห์" in map_render_df.columns
-      else "คลัง"
+      "รอบส่งประจำสัปดาห์" if "รอบส่งประจำสัปดาห์" in df.columns else "คลัง"
   )
   p_type = "หน้า 3"
 
 unique_cats = (
-    map_render_df[color_col].dropna().unique().tolist()
-    if color_col in map_render_df.columns
+    df[color_col].dropna().unique().tolist()
+    if color_col in df.columns
     else []
 )
 color_map = get_color_mapping(unique_cats, p_type)
 
-# วาดหมุดลงบนแผนที่
-for idx, row in map_render_df.iterrows():
+# วาดหมุดลงบนแผนที่ทีละจุดอย่างปลอดภัย
+for idx, row in df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
 
   matches_truck = (
@@ -331,9 +328,8 @@ for idx, row in map_render_df.iterrows():
     if filter_display_mode == "ซ่อนจุดที่ไม่เลือก (หายไปไม่ปรากฎ)":
       continue
     else:
-      # จุดที่ไม่เลือกแสดงเป็นสีเทาทึบเต็มวง
-      pin_color = "#64748b"
-      opacity = 0.5
+      pin_color = "#64748b"  # สีเทาทึบ
+      opacity = 0.6
       tooltip_html = f"""
         <b>รหัส:</b> {row.get('รหัสสมาชิก', '-')}<br>
         <b>ชื่อ:</b> {row.get('ชื่อ-นามสกุล', '-')}<br>
