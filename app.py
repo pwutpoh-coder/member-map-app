@@ -212,10 +212,20 @@ row_limit = st.sidebar.selectbox(
 
 
 # ==========================================
+# สร้างชุดข้อมูลที่ผ่านการกรองจาก Sidebar (ใช้ร่วมกันทั้งแผนที่, ตารางสรุป และตารางรายละเอียด)
+# ==========================================
+filtered_df = df.copy()
+if sel_truck != "ทั้งหมด":
+  filtered_df = filtered_df[filtered_df["เบอร์รถ"] == sel_truck]
+if sel_round != "ทั้งหมด":
+  filtered_df = filtered_df[filtered_df["รอบส่งประจำสัปดาห์"] == sel_round]
+
+
+# ==========================================
 # 1. ส่วนแผนที่ (อยู่ด้านบนสุด - รองรับการคลิกหมุด)
 # ==========================================
 st.subheader(
-    f"🗺️ แผนที่แสดงพิกัด (คลัง: {selected_warehouse}, ทั้งหมด {len(df):,} จุด)"
+    f"🗺️ แผนที่แสดงพิกัด (คลัง: {selected_warehouse}, แสดง {len(filtered_df):,} จากทั้งหมด {len(df):,} จุด)"
 )
 st.info(
     "💡 คำแนะนำ: คุณสามารถใช้เมาส์ **คลิกที่จุดหมุดบนแผนที่**"
@@ -295,7 +305,7 @@ unique_cats = (
 )
 color_map = get_color_mapping(unique_cats, page)
 
-# วาดหมุดลงบนแผนที่โดยกำหนด key เป็น lat, lon และรหัสสมาชิกเพื่อให้รับค่าคลิกได้แม่นยำ
+# วาดหมุดลงบนแผนที่ (วนลูปจาก df ทั้งหมด แต่แสดงผลตามเงื่อนไข Sidebar)
 for idx, row in df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
 
@@ -330,7 +340,6 @@ for idx, row in df.iterrows():
     <b>รอบส่ง:</b> {row.get('รอบส่งประจำสัปดาห์', '-')}
     """
 
-  # ใช้รหัสสมาชิกและพิกัดระบุตัวตนในแผนที่
   folium.CircleMarker(
       location=[lat, lon],
       radius=3,
@@ -343,21 +352,20 @@ for idx, row in df.iterrows():
       popup=str(row.get("รหัสสมาชิก", "")),
   ).add_to(m)
 
-# เรนเดอร์แผนที่และรับค่าการคลิกหมุด
 map_output = st_folium(
     m, width="100%", height=500, returned_objects=["last_clicked", "last_object_clicked"]
 )
 
 
 # ==========================================
-# 2. ส่วนตารางสรุปข้อมูล (Summary Table ตามแต่ละหน้า)
+# 2. ส่วนตารางสรุปข้อมูล (Summary Table - แปรผันตามตัวกรอง Sidebar)
 # ==========================================
 st.markdown("---")
 if "หน้า 1" in page:
-  st.subheader("📊 ตารางสรุปภาพรวมตาม 'คลัง'")
-  if not df.empty and "คลัง" in df.columns:
+  st.subheader("📊 ตารางสรุปภาพรวมตาม 'คลัง' (ตามตัวกรอง)")
+  if not filtered_df.empty and "คลัง" in filtered_df.columns:
     summary_df = (
-        df.groupby("คลัง")
+        filtered_df.groupby("คลัง")
         .agg(
             จำนวนเบอร์รถ=("เบอร์รถ", "nunique"),
             จำนวนสมาชิก=("รหัสสมาชิก", "count"),
@@ -367,17 +375,19 @@ if "หน้า 1" in page:
     )
     summary_df["ยอดส่งรวม"] = summary_df["ยอดส่งรวม"].apply(lambda x: f"{x:,.2f}")
     st.dataframe(summary_df, use_container_width=True)
+  else:
+    st.warning("⚠️ ไม่มีข้อมูลสรุปตามเงื่อนไขที่เลือก")
 
 elif "หน้า 2" in page:
-  st.subheader("📊 ตารางสรุปข้อมูลแยกตาม 'คลัง และ เบอร์รถ'")
-  if not df.empty and "เบอร์รถ" in df.columns:
+  st.subheader("📊 ตารางสรุปข้อมูลแยกตาม 'คลัง และ เบอร์รถ' (ตามตัวกรอง)")
+  if not filtered_df.empty and "เบอร์รถ" in filtered_df.columns:
     group_cols = (
         ["คลัง", "เบอร์รถ"]
-        if "คลัง" in df.columns
+        if "คลัง" in filtered_df.columns
         else ["เบอร์รถ"]
     )
     summary_df = (
-        df.groupby(group_cols)
+        filtered_df.groupby(group_cols)
         .agg(
             จำนวนสมาชิก=("รหัสสมาชิก", "count"),
             ยอดส่งรวม=("ยอดส่ง_numeric", "sum"),
@@ -386,17 +396,19 @@ elif "หน้า 2" in page:
     )
     summary_df["ยอดส่งรวม"] = summary_df["ยอดส่งรวม"].apply(lambda x: f"{x:,.2f}")
     st.dataframe(summary_df, use_container_width=True)
+  else:
+    st.warning("⚠️ ไม่มีข้อมูลสรุปตามเงื่อนไขที่เลือก")
 
 else:
-  st.subheader("📊 ตารางสรุปข้อมูลแยกตาม 'รอบส่งประจำสัปดาห์ และ เบอร์รถ'")
-  if not df.empty and "รอบส่งประจำสัปดาห์" in df.columns:
+  st.subheader("📊 ตารางสรุปข้อมูลแยกตาม 'รอบส่งประจำสัปดาห์ และ เบอร์รถ' (ตามตัวกรอง)")
+  if not filtered_df.empty and "รอบส่งประจำสัปดาห์" in filtered_df.columns:
     group_cols = (
         ["รอบส่งประจำสัปดาห์", "เบอร์รถ"]
-        if "เบอร์รถ" in df.columns
+        if "เบอร์รถ" in filtered_df.columns
         else ["รอบส่งประจำสัปดาห์"]
     )
     summary_df = (
-        df.groupby(group_cols)
+        filtered_df.groupby(group_cols)
         .agg(
             จำนวนสมาชิก=("รหัสสมาชิก", "count"),
             ยอดส่งรวม=("ยอดส่ง_numeric", "sum"),
@@ -405,6 +417,8 @@ else:
     )
     summary_df["ยอดส่งรวม"] = summary_df["ยอดส่งรวม"].apply(lambda x: f"{x:,.2f}")
     st.dataframe(summary_df, use_container_width=True)
+  else:
+    st.warning("⚠️ ไม่มีข้อมูลสรุปตามเงื่อนไขที่เลือก")
 
 
 # ==========================================
@@ -413,21 +427,12 @@ else:
 st.markdown("---")
 st.subheader("📋 รายละเอียดข้อมูลสมาชิก (แสดงด้านล่าง)")
 
-# กรองข้อมูลตารางตาม Sidebar ก่อน
-table_filtered_df = df.copy()
-if sel_truck != "ทั้งหมด":
-  table_filtered_df = table_filtered_df[
-      table_filtered_df["เบอร์รถ"] == sel_truck
-  ]
-if sel_round != "ทั้งหมด":
-  table_filtered_df = table_filtered_df[
-      table_filtered_df["รอบส่งประจำสัปดาห์"] == sel_round
-  ]
-
 # ตรวจสอบว่าผู้ใช้คลิกเลือกหมุดบนแผนที่หรือไม่
 clicked_member_id = None
 if map_output and map_output.get("last_object_clicked"):
   clicked_member_id = map_output["last_object_clicked"].get("popup")
+
+table_display_df = filtered_df.copy()
 
 if clicked_member_id:
   st.success(
@@ -435,8 +440,8 @@ if clicked_member_id:
   )
   if st.button("🔄 ล้างการเลือก (แสดงทั้งหมดตามตัวกรอง Sidebar)"):
     st.rerun()
-  table_filtered_df = table_filtered_df[
-      table_filtered_df["รหัสสมาชิก"] == str(clicked_member_id)
+  table_display_df = table_display_df[
+      table_display_df["รหัสสมาชิก"] == str(clicked_member_id)
   ]
 else:
   st.info(
@@ -455,15 +460,15 @@ display_cols = [
         "รอบส่งประจำสัปดาห์",
         "ยอดส่ง/เดือน ( ก.ย.69)",
     ]
-    if c in table_filtered_df.columns
+    if c in table_display_df.columns
 ]
 
-if not table_filtered_df.empty:
-  table_df = table_filtered_df[display_cols].reset_index(drop=True)
-  table_display = (
+if not table_display_df.empty:
+  table_df = table_display_df[display_cols].reset_index(drop=True)
+  table_limited = (
       table_df.head(int(row_limit)) if row_limit != "ทั้งหมด" else table_df
   )
 
-  st.dataframe(table_display, use_container_width=True)
+  st.dataframe(table_limited, use_container_width=True)
 else:
   st.warning("⚠️ ไม่พบข้อมูลตามเงื่อนไขที่เลือก")
