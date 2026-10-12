@@ -41,7 +41,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (หมุดทึบเต็มวง & แผนที่โทนจาง)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (แผนที่จริงเสถียร 100%)</div>',
     unsafe_allow_html=True,
 )
 
@@ -142,12 +142,14 @@ page = st.sidebar.radio(
     key="page_selector_key",
 )
 
-# --- ตัวเลือกสไตล์แผนที่ (ใช้ CartoDB Positron เป็นค่าเริ่มต้นเพื่อให้แผนที่สีจางลง ไม่ทับหมุด) ---
+# --- ตัวเลือกสไตล์แผนที่ (ใช้ URL เสถียร ไม่หลุด) ---
 st.sidebar.markdown("---")
 map_theme = st.sidebar.radio(
     "🗺️ เลือกสไตล์แผนที่:",
     [
-        "แผนที่สีจาง (CartoDB Positron - แนะนำไม่ให้สีทับหมุด)",
+        (
+            "แผนที่สีจาง (CartoDB Positron - แนะนำไม่ให้สีแผนที่ทับกับสีพิกัด)"
+        ),
         "แผนที่ปกติ (OpenStreetMap)",
     ],
     index=0,
@@ -224,17 +226,22 @@ if not map_render_df.empty:
 else:
   center_lat, center_lon = 13.7563, 100.5018
 
-# กำหนด Tile ตามตัวเลือกสไตล์แผนที่
-tile_provider = (
-    "CartoDB positron"
-    if "สีจาง" in map_theme
-    else "OpenStreetMap"  # แผนที่สีจางสะอาดตา ไม่ทับกับสีพิกัด
-)
+# กำหนด Tile Provider ผ่าน URL Template โดยตรงเพื่อความเสถียร 100%
+if "สีจาง" in map_theme:
+  tile_url = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+  attr_text = '&copy; <a href="https://carto.com/">CARTO</a>'
+else:
+  tile_url = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+  attr_text = (
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+      " contributors"
+  )
 
 m = folium.Map(
     location=[center_lat, center_lon],
     zoom_start=11,
-    tiles=tile_provider,
+    tiles=tile_url,
+    attr=attr_text,
 )
 
 
@@ -305,7 +312,7 @@ unique_cats = (
 )
 color_map = get_color_mapping(unique_cats, p_type)
 
-# วาดหมุดลงบนแผนที่ (ใช้ folium.Circle สำหรับจุดที่ไม่เลือกเพื่อให้เป็นวงกลมทึบเต็มวง ไม่มีรูตรงกลาง)
+# วาดหมุดลงบนแผนที่
 for idx, row in map_render_df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
 
@@ -324,8 +331,8 @@ for idx, row in map_render_df.iterrows():
     if filter_display_mode == "ซ่อนจุดที่ไม่เลือก (หายไปไม่ปรากฎ)":
       continue
     else:
-      # ใช้ folium.Circle สีเทาทึบเต็มวง ไม่มีรูตรงกลาง
-      pin_color = "#64748b"  # สีเทาทึบ
+      # จุดที่ไม่เลือกแสดงเป็นสีเทาทึบเต็มวง
+      pin_color = "#64748b"
       opacity = 0.5
       tooltip_html = f"""
         <b>รหัส:</b> {row.get('รหัสสมาชิก', '-')}<br>
@@ -335,11 +342,10 @@ for idx, row in map_render_df.iterrows():
         <b>รถ:</b> {row.get('เบอร์รถ', '-')}<br>
         <b>รอบส่ง:</b> {row.get('รอบส่งประจำสัปดาห์', '-')}
         """
-      folium.Circle(
+      folium.CircleMarker(
           location=[lat, lon],
-          radius=40,  # ขนาดรัศมีหน่วยเป็นเมตร (ปรับความเล็กใหญ่ได้ตามต้องการ)
+          radius=3,
           color=pin_color,
-          weight=1,
           fill=True,
           fill_color=pin_color,
           fill_opacity=opacity,
@@ -360,10 +366,9 @@ for idx, row in map_render_df.iterrows():
     <b>รอบส่ง:</b> {row.get('รอบส่งประจำสัปดาห์', '-')}
     """
 
-  # สำหรับจุดที่เลือกใช้ CircleMarker รัศมีเล็ก (radius=3)
   folium.CircleMarker(
       location=[lat, lon],
-      radius=3,  # ลดขนาดพิกัดให้เล็กลง
+      radius=3,
       color=pin_color,
       fill=True,
       fill_color=pin_color,
