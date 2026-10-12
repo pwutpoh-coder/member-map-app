@@ -41,7 +41,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (แยกสีตามหน้าอย่างถูกต้อง)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (เลือกสไตล์แผนที่ & แยกสีตามหน้า)</div>',
     unsafe_allow_html=True,
 )
 
@@ -154,12 +154,14 @@ page = st.sidebar.radio(
     key="page_selector_key",
 )
 
-# --- ตัวเลือกสไตล์แผนที่ ---
+# --- ตัวเลือกสไตล์แผนที่ (เลือกได้ระหว่างสีเทาจางกับปกติ) ---
 st.sidebar.markdown("---")
 map_theme = st.sidebar.radio(
     "🗺️ เลือกสไตล์แผนที่:",
     [
-        "แผนที่สีจาง (CartoDB Positron - แนะนำไม่ให้สีแผนที่ทับกับสีพิกัด)",
+        (
+            "แผนที่สีจาง (CartoDB Positron - แนะนำไม่ให้สีแผนที่ทับกับสีพิกัด)"
+        ),
         "แผนที่ปกติ (OpenStreetMap)",
     ],
     index=0,
@@ -234,23 +236,18 @@ if not df.empty:
 else:
   center_lat, center_lon = 13.7563, 100.5018
 
-# กำหนด URL ของ Tile ตามตัวเลือก
+# กำหนด Tile Provider ตามตัวเลือกสไตล์แผนที่
 if "สีจาง" in map_theme:
-  tile_url = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-  attr_text = "&copy; CARTO"
+  tile_name = "cartodbpositron"
 else:
-  tile_url = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-  attr_text = "&copy; OpenStreetMap contributors"
+  tile_name = "openstreetmap"
 
 m = folium.Map(
-    location=[center_lat, center_lon],
-    zoom_start=11,
-    tiles=tile_url,
-    attr=attr_text,
+    location=[center_lat, center_lon], zoom_start=11, tiles=tile_name
 )
 
 
-# ฟังก์ชันกำหนดสีตามหน้า (แก้ไขให้แยกคอลัมน์และสีตามหน้าที่ผู้ใช้เลือกอย่างแม่นยำ)
+# ฟังก์ชันกำหนดสีตามหน้า
 def get_color_mapping(categories, page_type):
   if "หน้า 3" in page_type:
     # กำหนดสีมาตรฐานตามวันในสัปดาห์
@@ -315,7 +312,7 @@ unique_cats = (
 )
 color_map = get_color_mapping(unique_cats, page)
 
-# วาดหมุดลงบนแผนทีทีละจุดอย่างปลอดภัย
+# วาดหมุดลงบนแผนที่ทีละจุดอย่างปลอดภัย
 for idx, row in df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
 
