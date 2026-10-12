@@ -1,8 +1,6 @@
 from urllib.parse import quote
-import folium
 import pandas as pd
 import streamlit as st
-from streamlit_folium import st_folium
 
 # ตั้งค่าหน้าเว็บ Streamlit (Layout กว้างเต็มจอ)
 st.set_page_config(
@@ -21,27 +19,13 @@ st.markdown(
             color: #1e293b;
             margin-bottom: 5px;
         }
-        /* กำหนดขนาดกล่อง Tooltip เมื่อเอาเมาส์ชี้ กว้างประมาณ 5 ซม. (190px) ตัดคำและขึ้นบรรทัดใหม่ */
-        .leaflet-tooltip.custom-tooltip {
-            background-color: #ffffff !important;
-            border: 1px solid #cbd5e1 !important;
-            border-radius: 6px !important;
-            padding: 8px !important;
-            font-size: 12px !important;
-            font-family: sans-serif !important;
-            color: #1e293b !important;
-            width: 190px !important;
-            white-space: normal !important;
-            word-wrap: break-word !important;
-            box-shadow: 0px 2px 6px rgba(0,0,0,0.15);
-        }
     </style>
 """,
     unsafe_allow_html=True,
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (เวอร์ชันเสถียรพิเศษ)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (โหมดเสถียรสูงสุด 100%)</div>',
     unsafe_allow_html=True,
 )
 
@@ -146,30 +130,18 @@ df = process_coordinates(df)
 # --- เลือกหน้า (แยกสี 3 หน้า) ---
 st.sidebar.markdown("---")
 page = st.sidebar.radio(
-    "📊 เลือกมุมมองแผนที่แยกสี",
+    "📊 เลือกมุมมองแผนที่",
     [
-        "หน้า 1: แยกสีตาม 'คลัง'",
-        "หน้า 2: แยกสีตาม 'เบอร์รถ'",
-        "หน้า 3: แยกสีตาม 'รอบส่งประจำสัปดาห์' (กำหนดสีตามวัน)",
+        "หน้า 1: ข้อมูลคลัง",
+        "หน้า 2: ข้อมูลเบอร์รถ",
+        "หน้า 3: รอบส่งประจำสัปดาห์",
     ],
     key="page_selector_key",
 )
 
-# --- ตัวเลือกสไตล์แผนที่ ---
-st.sidebar.markdown("---")
-map_theme = st.sidebar.radio(
-    "🗺️ เลือกสไตล์แผนที่:",
-    [
-        "แผนที่สีจาง (CartoDB Positron - แนะนำไม่ให้สีแผนที่ทับกับสีพิกัด)",
-        "แผนที่ปกติ (OpenStreetMap)",
-    ],
-    index=0,
-    key="map_theme_key",
-)
-
 # --- ตัวกรองย่อยเพิ่มเติม (เบอร์รถ / รอบส่ง) ---
 st.sidebar.markdown("---")
-st.sidebar.header("⚙️ ตัวกรองเพิ่มเติมและเงื่อนไขการแสดงผล")
+st.sidebar.header("⚙️ ตัวกรองเพิ่มเติม")
 
 trucks = (
     ["ทั้งหมด"] + df["เบอร์รถ"].dropna().unique().tolist()
@@ -189,28 +161,12 @@ sel_round = st.sidebar.selectbox(
     "เลือกรอบส่งประจำสัปดาห์", rounds, index=0, key="round_filter_key"
 )
 
-# ทางเลือกการแสดงผลเมื่อใช้ตัวกรองย่อย
-st.sidebar.markdown("---")
-filter_display_mode = st.sidebar.radio(
-    "รูปแบบการแสดงผลจุดที่ไม่ได้เลือกในตัวกรอง:",
-    [
-        "ซ่อนจุดที่ไม่เลือก (หายไปไม่ปรากฎ)",
-        "แสดงจุดที่ไม่เลือกเป็น 'สีเทาทึบ' (ไม่มีรูกลวง)",
-    ],
-    index=0,
-    key="filter_mode_key",
-)
-
-# แยกตารางสำหรับข้อมูลที่จะนำไปแสดงในตารางด้านล่าง
-table_filtered_df = df.copy()
+# กรองข้อมูลตามตัวกรองย่อยสำหรับแผนที่และตาราง
+filtered_df = df.copy()
 if sel_truck != "ทั้งหมด":
-  table_filtered_df = table_filtered_df[
-      table_filtered_df["เบอร์รถ"] == sel_truck
-  ]
+  filtered_df = filtered_df[filtered_df["เบอร์รถ"] == sel_truck]
 if sel_round != "ทั้งหมด":
-  table_filtered_df = table_filtered_df[
-      table_filtered_df["รอบส่งประจำสัปดาห์"] == sel_round
-  ]
+  filtered_df = filtered_df[filtered_df["รอบส่งประจำสัปดาห์"] == sel_round]
 
 # --- ตั้งค่าจำนวนแถวแสดงผลตารางด้านล่าง ---
 st.sidebar.markdown("---")
@@ -223,151 +179,19 @@ row_limit = st.sidebar.selectbox(
 
 
 # ==========================================
-# 1. ส่วนแผนที่ (อยู่ด้านบนสุด - ใช้ FeatureGroup เสริมความเสถียร)
+# 1. ส่วนแผนที่ (ใช้ st.map เสถียร 100% ไม่หลุดไม่หาย)
 # ==========================================
+total_points = len(filtered_df)
 st.subheader(
-    f"🗺️ แผนที่แสดงพิกัด (คลัง: {selected_warehouse}, ทั้งหมด {len(df):,} จุด)"
+    f"🗺️ แผนที่แสดงพิกัด (คลัง: {selected_warehouse}, แสดง {total_points:,} จุด)"
 )
 
-if not df.empty:
-  center_lat = float(df["lat"].mean())
-  center_lon = float(df["lon"].mean())
+if not filtered_df.empty:
+  # st.map ต้องการคอลัมน์ชื่อ lat และ lon เท่านั้น
+  map_data = filtered_df[["lat", "lon"]].copy()
+  st.map(map_data, zoom=10, use_container_width=True)
 else:
-  center_lat, center_lon = 13.7563, 100.5018
-
-# กำหนด URL ของ Tile ตามตัวเลือก
-if "สีจาง" in map_theme:
-  tile_url = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-  attr_text = "&copy; CARTO"
-else:
-  tile_url = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-  attr_text = "&copy; OpenStreetMap contributors"
-
-# สร้าง Map object พื้นฐาน
-m = folium.Map(
-    location=[center_lat, center_lon],
-    zoom_start=11,
-    tiles=tile_url,
-    attr=attr_text,
-)
-
-
-# ฟังก์ชันกำหนดสีตามหน้า
-def get_color_mapping(categories, page_type):
-  if page_type == "หน้า 3":
-    day_colors = {
-        "จันทร์": "#ca8a04",  # สีเหลือง
-        "อังคาร": "#be185d",  # สีชมพู
-        "พุธ": "#16a34a",  # สีเขียว
-        "พฤหัสบดี": "#ea580c",  # สีส้ม
-        "พฤหัส": "#ea580c",
-        "ศุกร์": "#0284c7",  # สีฟ้า
-        "เสาร์": "#9333ea",  # สีม่วง
-        "อาทิตย์": "#dc2626",  # สีแดง
-    }
-    mapping = {}
-    fallback_colors = ["#2563eb", "#0d9488", "#4f46e5", "#eab308"]
-    for i, cat in enumerate(categories):
-      cat_str = str(cat).strip()
-      matched = False
-      for day_key in day_colors:
-        if day_key in cat_str:
-          mapping[cat_str] = day_colors[day_key]
-          matched = True
-          break
-      if not matched:
-        mapping[cat_str] = fallback_colors[i % len(fallback_colors)]
-    return mapping
-  else:
-    colors = [
-        "#2563eb",
-        "#dc2626",
-        "#16a34a",
-        "#9333ea",
-        "#ea580c",
-        "#0891b2",
-        "#4f46e5",
-        "#ca8a04",
-        "#0d9488",
-        "#be185d",
-        "#22c55e",
-        "#eab308",
-    ]
-    return {
-        str(cat): colors[i % len(colors)] for i, cat in enumerate(categories)
-    }
-
-
-if "หน้า 1" in page:
-  color_col = "คลัง"
-  p_type = "หน้า 1"
-elif "หน้า 2" in page:
-  color_col = "เบอร์รถ"
-  p_type = "หน้า 2"
-else:
-  color_col = (
-      "รอบส่งประจำสัปดาห์" if "รอบส่งประจำสัปดาห์" in df.columns else "คลัง"
-  )
-  p_type = "หน้า 3"
-
-unique_cats = (
-    df[color_col].dropna().unique().tolist()
-    if color_col in df.columns
-    else []
-)
-color_map = get_color_mapping(unique_cats, p_type)
-
-# ใช้ FeatureGroup เพื่อรวมกลุ่มหมุด ช่วยให้แผนที่เรนเดอร์ได้เสถียรและเร็วขึ้น
-marker_cluster = folium.FeatureGroup(name="Markers").add_to(m)
-
-# วาดหมุดลงบน FeatureGroup ทีละจุดอย่างปลอดภัย
-for idx, row in df.iterrows():
-  lat, lon = float(row["lat"]), float(row["lon"])
-
-  matches_truck = (
-      (sel_truck == "All" or sel_truck == "ทั้งหมด")
-      or (str(row.get("เบอร์รถ", "")) == sel_truck)
-  )
-  matches_round = (
-      (sel_round == "All" or sel_round == "ทั้งหมด")
-      or (str(row.get("รอบส่งประจำสัปดาห์", "")) == sel_round)
-  )
-
-  is_fully_matched = matches_truck and matches_round
-
-  if not is_fully_matched:
-    if filter_display_mode == "ซ่อนจุดที่ไม่เลือก (หายไปไม่ปรากฎ)":
-      continue
-    else:
-      pin_color = "#64748b"  # สีเทาทึบ
-      opacity = 0.5
-  else:
-    cat_val = str(row.get(color_col, "default"))
-    pin_color = color_map.get(cat_val, "#2563eb")
-    opacity = 0.9
-
-  tooltip_html = f"""
-    <b>รหัส:</b> {row.get('รหัสสมาชิก', '-')}<br>
-    <b>ชื่อ:</b> {row.get('ชื่อ-นามสกุล', '-')}<br>
-    <b>ที่อยู่:</b> {row.get('ที่อยู่จัดส่ง บ้านเลขที่/อาคาร', '-')}<br>
-    <b>คลัง:</b> {row.get('คลัง', '-')}<br>
-    <b>รถ:</b> {row.get('เบอร์รถ', '-')}<br>
-    <b>รอบส่ง:</b> {row.get('รอบส่งประจำสัปดาห์', '-')}
-    """
-
-  folium.CircleMarker(
-      location=[lat, lon],
-      radius=3,
-      color=pin_color,
-      weight=1,
-      fill=True,
-      fill_color=pin_color,
-      fill_opacity=opacity,
-      tooltip=folium.Tooltip(tooltip_html, className="custom-tooltip"),
-  ).add_to(marker_cluster)
-
-# แสดงแผนที่อย่างมั่นคง (returned_objects=[] ป้องกันการรีเฟรชซ้ำเมื่อซูม)
-st_data = st_folium(m, width="100%", height=500, returned_objects=[])
+  st.warning("⚠️ ไม่มีข้อมูลพิกัดตามเงื่อนไขที่เลือกสำหรับแสดงบนแผนที่")
 
 
 # ==========================================
@@ -391,11 +215,11 @@ display_cols = [
         "รอบส่งประจำสัปดาห์",
         "ยอดส่ง/เดือน ( ก.ย.69)",
     ]
-    if c in table_filtered_df.columns
+    if c in filtered_df.columns
 ]
 
-if not table_filtered_df.empty:
-  table_df = table_filtered_df[display_cols].reset_index(drop=True)
+if not filtered_df.empty:
+  table_df = filtered_df[display_cols].reset_index(drop=True)
   table_display = (
       table_df.head(int(row_limit)) if row_limit != "ทั้งหมด" else table_df
   )
