@@ -6,9 +6,7 @@ from streamlit_folium import st_folium
 
 # ตั้งค่าหน้าเว็บ Streamlit (Layout กว้างเต็มจอ)
 st.set_page_config(
-    page_title="ระบบแผนที่จัดส่งสินค้า (High Performance)",
-    page_icon="🗺️",
-    layout="wide",
+    page_title="ระบบแผนที่จัดส่งสินค้า (Stable)", page_icon="🗺️", layout="wide"
 )
 
 # ตกแต่ง UI ด้วย CSS
@@ -41,7 +39,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (แสดงพิกัดสมบูรณ์)</div>',
+    '<div class="main-header">🗺️ ระบบแผนที่และข้อมูลการจัดส่งสินค้า (เวอร์ชันเสถียร 100%)</div>',
     unsafe_allow_html=True,
 )
 
@@ -125,8 +123,8 @@ def process_coordinates(data_frame):
       parts = str(val).split(",")
       lat_val = float(parts[0].strip())
       lon_val = float(parts[1].strip())
-      # ตรวจสอบช่วงพิกัดประเทศไทยเบื้องต้นเพื่อป้องกันค่าเพี้ยน
-      if 5.0 <= lat_val <= 21.0 and 97.0 <= lon_val <= 106.0:
+      # ช่วงพิกัดประเทศไทย (ครอบคลุมเพื่อนบ้านใกล้เคียงด้วยเพื่อกันข้อมูลตกหล่น)
+      if 5.0 <= lat_val <= 25.0 and 95.0 <= lon_val <= 107.0:
         lats.append(lat_val)
         lons.append(lon_val)
       else:
@@ -138,7 +136,6 @@ def process_coordinates(data_frame):
 
   data_frame["lat"] = lats
   data_frame["lon"] = lons
-  # ตัดแถวที่แปลงพิกัดไม่สำเร็จออกเด็ดขาด
   return data_frame.dropna(subset=["lat", "lon"]).reset_index(drop=True)
 
 
@@ -236,11 +233,21 @@ if not df.empty:
 else:
   center_lat, center_lon = 13.7563, 100.5018
 
-# กำหนด Tile Provider ตามตัวเลือก
-tile_name = "cartodbpositron" if "สีจาง" in map_theme else "openstreetmap"
+# กำหนด URL ของ Tile ตามตัวเลือก
+if "สีจาง" in map_theme:
+  tile_url = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+  attr_text = "&copy; CARTO"
+else:
+  tile_url = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+  attr_text = "&copy; OpenStreetMap contributors"
 
+# สร้าง Map object
 m = folium.Map(
-    location=[center_lat, center_lon], zoom_start=11, tiles=tile_name
+    location=[center_lat, center_lon],
+    zoom_start=11,
+    tiles=tile_url,
+    attr=attr_text,
+    control_scale=True,
 )
 
 
@@ -309,7 +316,7 @@ unique_cats = (
 )
 color_map = get_color_mapping(unique_cats, p_type)
 
-# วาดหมุดลงบนแผนที่ทีละจุดอย่างปลอดภัย
+# วาดหมุดลงบนแผนทีทีละจุดอย่างปลอดภัย
 for idx, row in df.iterrows():
   lat, lon = float(row["lat"]), float(row["lon"])
 
@@ -329,25 +336,7 @@ for idx, row in df.iterrows():
       continue
     else:
       pin_color = "#64748b"  # สีเทาทึบ
-      opacity = 0.6
-      tooltip_html = f"""
-        <b>รหัส:</b> {row.get('รหัสสมาชิก', '-')}<br>
-        <b>ชื่อ:</b> {row.get('ชื่อ-นามสกุล', '-')}<br>
-        <b>ที่อยู่:</b> {row.get('ที่อยู่จัดส่ง บ้านเลขที่/อาคาร', '-')}<br>
-        <b>คลัง:</b> {row.get('คลัง', '-')}<br>
-        <b>รถ:</b> {row.get('เบอร์รถ', '-')}<br>
-        <b>รอบส่ง:</b> {row.get('รอบส่งประจำสัปดาห์', '-')}
-        """
-      folium.CircleMarker(
-          location=[lat, lon],
-          radius=3,
-          color=pin_color,
-          fill=True,
-          fill_color=pin_color,
-          fill_opacity=opacity,
-          tooltip=folium.Tooltip(tooltip_html, className="custom-tooltip"),
-      ).add_to(m)
-      continue
+      opacity = 0.5
   else:
     cat_val = str(row.get(color_col, "default"))
     pin_color = color_map.get(cat_val, "#2563eb")
@@ -366,13 +355,14 @@ for idx, row in df.iterrows():
       location=[lat, lon],
       radius=3,
       color=pin_color,
+      weight=1,
       fill=True,
       fill_color=pin_color,
       fill_opacity=opacity,
       tooltip=folium.Tooltip(tooltip_html, className="custom-tooltip"),
   ).add_to(m)
 
-# แสดงแผนที่ (returned_objects=[] ป้องกันการรีเฟรชซ้ำเมื่อซูม)
+# แสดงแผนที่อย่างมั่นคง (returned_objects=[] ป้องกันการรีเฟรชซ้ำ)
 st_data = st_folium(m, width="100%", height=500, returned_objects=[])
 
 
